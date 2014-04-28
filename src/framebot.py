@@ -129,16 +129,16 @@ def mill_temples(outdir, temples, temple_length):
         cam.temporary_offset(offset),
         temple_hinge_pockets(temples),
         index_holes([l_temple, r_temple], thickness),
-        thin_temples([l_temple, r_temple], temple_length),
+        #thin_temples([l_temple, r_temple], temple_length),
     ]
     open(outdir + "/temples_milling.ngc", "w").write(to_string(program))
 
 def thin_temples(temples, temple_length):
     left = temples[0]
     right = temples[1]
-    farthest_point = poly.bottom(left)
-    left_side = poly.top(left)
-    halfway = left_side + (farthest_point - left_side)/2
+    left_side = poly.bottom(left)
+    right_side = poly.top(left)
+    halfway = left_side + (right_side - left_side)/2
 
     taperpath = []
     for pt in left:
@@ -147,19 +147,21 @@ def thin_temples(temples, temple_length):
         elif pt[1] > halfway:
             taperpath.append(pt)
 
+    print taperpath
     # offset the path so our 1/2 mill cuts the whole thing
     # TODO: gauge width and make sure we're cutting the whole thing.
-    flat_begin = left_side - temple_length +10 # 20 mm flat
-    flat_end = flat_begin - 20
+    flat_begin = left_side + temple_length -10 # 20 mm flat
+    flat_end = flat_begin + 20
     front_slope = -2.0 / (halfway-flat_begin)
 
     print "flat", flat_begin, flat_end
-    print left_side, farthest_point, halfway
+    print left_side, right_side, halfway
     def calc_thinning_z(pt):
         if pt[1] > flat_begin:
-            print pt[1]
+            print 'Over flat begin', pt
             return (abs(pt[1]-halfway) * front_slope)
         elif pt[1] > flat_end:
+            print 'over flat end'
             return -4
         else:
             return -(pt[0]-flat_end)/4 - 4

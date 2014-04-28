@@ -111,6 +111,8 @@ def intercepts(polyline, x=[], y=[], closed=True):
     return intercept_lengths
 
 def rotate(poly, angle):
+    if len(poly) == 0:
+        return []
     rad = math.radians(angle)
     cosx = math.cos(rad)
     sinx = math.sin(rad)
@@ -293,6 +295,8 @@ def reverse(contour):
     return [contour[0]] + contour[1:][::-1]  # Contour[0] is added to the front to maintain the start point
 
 def translate(poly, dx, dy):
+    if len(poly) == 0:
+        return []
     if len(poly[0]) > 2:
         return [[p[0] + dx, p[1] + dy, p[2]] for p in poly]
     else:
