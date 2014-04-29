@@ -51,19 +51,37 @@ def mill_fronts(outdir, order):
     first milling operation is done on an unregistered plastic blank,
     so includes creating registration holes for subsequent operations."""
 
-    #TODO: Replace with information in materials database
+#TODO: Replace with information in materials database
+# Initial thickness of the forward-facing lamination.  0 if no lamination.
     front_surface_thickness = 0
-    back_surface_thickness = 4
+
+# The final desired thickness of the fronto facing lamination.  Must
+# be equal to or less than the front_surface_thickness.
     final_front_thickness = 0
-    final_back_thickness = 4
+
+# Initial thickness of the face side lamination. Use this thickness only if
+# stock is solid
+    back_surface_thickness = 5
+
+# The final thickness of the left and right extremes of the frame where the
+# hinge will go.  Must be equal to or less than back_surface_thickness.
+    hinge_thickness = 5
+
+# The thickness of the highest point of the nosepad
+    nosepad_thickness = 5
+
+# Final thickness of the main part of the frame.  Must be equal to or less than
+# the back_surface_thickness.
+    back_thickness = 4
+
     thickness = final_front_thickness + final_back_thickness
 
     front_surface_removal = final_front_thickness - front_surface_thickness
     back_surface_removal = final_back_thickness - back_surface_thickness
 
 
-   # The machine has the stock clamp oriented 90 degrees to the way the
-    # software creates the contours.
+# The machine has the stock clamp oriented 90 degrees to the way the
+# software creates the contours.
     face_c = poly.rotate_90(order["face_con"])
     left_lens_c = poly.rotate_90(order["lhole_con"])
     right_lens_c = poly.rotate_90(order["rhole_con"])
@@ -86,8 +104,8 @@ def mill_fronts(outdir, order):
         cam.change_tool("1/16in endmill"),
         cam.rapid([0, 0]),
         cam.temporary_offset(offset),
-       # Note that X and Y parameters in the order are switched from our system
-        #TODO: replace the thickness offset with the thickness of the TEMPLE, not the fronts.
+# Note that X and Y parameters in the order are switched from our system
+#TODO: replace the thickness offset with the thickness of the TEMPLE, not the fronts.
         face_hinge_pockets(order["lhinge"], order["lhinge_y"], order["ltemple_x"]),
         index_holes([face_c], thickness),
         lens_holes(left_lens_c, right_lens_c, thickness),
@@ -102,8 +120,18 @@ def mill_fronts(outdir, order):
     ]
     open(outdir + "/face_stage1.ngc", "w").write(to_string(program))
 
+
+def contour_face(thickness, hinge_thickness, nosepad_thickness, face_c, lens_c):
+    cutter_radius = 9.525 # 3/4 inch cutter
+
+    facing_contour = poly.dilate(lens_c, cutter_radius-1)
+    leftmost = poly.left(facing_contour)
+
+
+
+
 def mill_temples(outdir, temples, temple_length):
-    #TODO: Replace with information in materials database
+#TODO: Replace with information in materials database
     front_surface_thickness = 0
     back_surface_thickness = 4
     final_front_thickness = 0
