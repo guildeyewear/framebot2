@@ -25,14 +25,14 @@ def get_hinge(pn, left=True):
 
     h = json.load(open("hinges/%d.json" % pn))
     # hinges are modelled with y in reverse orientation from the mill
-    to_rotate = ['face_holes', 'face_contour']
-    to_flip = ['face_holes', 'face_contour'] #, 'temple_contour']
+#    to_rotate = ['face_holes', 'face_contour']
+#    to_flip = ['face_holes', 'face_contour'] #, 'temple_contour']
 
-    for key in to_flip:
-        h[key] = flip_x(h[key])
+#    for key in to_flip:
+#        h[key] = flip_x(h[key])
 
-    for key in to_rotate:
-        h[key] = poly.rotate(h[key], 90)
+#    for key in to_rotate:
+#        h[key] = poly.rotate(h[key], 90)
 
     #h['temple_contour'] = poly.rotate(h['temple_contour'], 90)
     #h['temple_contour'] = flip_y(h['temple_contour'])
@@ -43,11 +43,11 @@ def get_hinge(pn, left=True):
         # Rotational angle of temple hinge is slightly off
         h['temple_holes'] = poly.rotate(h['temple_holes'], -6)
         h['temple_contour'] = poly.rotate(h['temple_contour'], -6)
-        h['temple_holes'] = poly.translate(h['temple_holes'], 1, 0)
-        h['temple_contour'] = poly.translate(h['temple_contour'], 1, 0)
-    elif pn == 0:
-        h['temple_holes'] = poly.translate(h['temple_holes'], -1, -1)
-        h['temple_contour'] = poly.translate(h['temple_contour'], -1, -1)
+#        h['temple_holes'] = poly.translate(h['temple_holes'], 1, 0)
+#        h['temple_contour'] = poly.translate(h['temple_contour'], 1, 0)
+#    elif pn == 0:
+#        h['temple_holes'] = poly.translate(h['temple_holes'], -1, -1)
+#        h['temple_contour'] = poly.translate(h['temple_contour'], -1, -1)
     if left:
         return h
     else:
@@ -60,7 +60,7 @@ def get_right_version(h):
     to_flip = ['face_holes', 'temple_holes', 'face_contour', 'temple_contour']
 
     for key in to_flip:
-        right_version[key] = flip_y(h[key])
+        right_version[key] = flip_x(h[key])
 
     return right_version
 

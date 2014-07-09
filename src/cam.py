@@ -3,10 +3,12 @@ TOOL_DEFINITIONS = {
         "1/16in endmill": 1,
         "1/8in endmill": 2,
         "1/4in endmill": 3,
-        "1/8in ballmill": 4,
+        "tapered endmill": 4,
         "1/4in ballmill": 5,
         "vgroove" : 6,
         "1mm drill": 7,
+        "3/4in surfacer": 8,
+        "downcut endmill": 9,
 };
 
 FIXTURE_DEFINITIONS = {

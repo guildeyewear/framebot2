@@ -31,7 +31,7 @@ def line_length(line):
 
     return l
 
-def polyline_length(polyline, closed=True):
+def polyline_length(polyline, closed = True):
     """Returns total length of a polyline.  Includes a line segment from the last vertex to the first if closed=True (the default)."""
     lengths = [line_length(pair) for pair in pairs(polyline, closed)]
 
@@ -84,7 +84,7 @@ def y_intercept(y, line):
 
     return rotate_90(r, False) # CCW rotation (undo previous CW)
 
-def intercepts(polyline, x=[], y=[], closed=True):
+def intercepts(polyline, closed, x=[], y=[]):
     """
     Finds x and/or y intercept points on a polyline, expressed in lengths from the start of the polyline.
 
@@ -135,19 +135,23 @@ def scale(polygon, scale):
 def dilate(r, polygon):
     scale_factor = 100.0
     scaled = scale(polygon, scale_factor);
-    #points = [[clipper.Point(p[0], p[1]) for p in scaled]];
-    offset = pyclipper.offset([scaled], r*scale_factor, jointype=1);
+    offset = pyclipper.offset([scaled], r*scale_factor, jointype=2);
     return [[p[0]/scale_factor, p[1]/scale_factor] for p in offset[0]];
     """Return the provided polygon, dilated by r."""
     # return m2d.run(circle(r), polygon, mode="dilate")
 
 
-def erode(r, polygon):
+def erode(r, polygon, jointype=2):
     scale_factor = 100.0
     scaled = scale(polygon, scale_factor);
-    #points = [[clipper.Point(p[0], p[1]) for p in scaled]];
-    offset = pyclipper.offset([scaled], -r*scale_factor, jointype=1);
+    offset = pyclipper.offset([scaled], -r*scale_factor, jointype);
+    if len(polygon[0]) > 2:
+        return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
+        #return  [[[p[0]/scale_factor, p[1]/scale_factor, p[2]] for p in off] for off in offset]
+    #Holes are messing us up, only return the first eroded path.
+    print 'eroded offset has', len(offset)
     return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
+    #return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
 
 #    return m2d.run(circle(r), polygon, mode="erode")
 
@@ -188,7 +192,7 @@ def shorter_segment(line, length):
 
     return r
 
-def point_at_length(polyline, length, closed=True):
+def point_at_length(polyline, length, closed):
     """Returns the coordinates of a point at length distance along the polyline."""
 
     if length > polyline_length(polyline, closed):
@@ -232,7 +236,7 @@ def segment(polyline, start, end, closed):
 
     return [start_p] + middle + [end_p]
 
-def make_gaps(polyline, lengths, gap, top, bottom, closed=True):
+def make_gaps(polyline, lengths, gap, top, bottom, closed):
     """
     Adds steps to the 'polyline' at the given 'lengths' with a width of 'gap'.
     Non-gap pieces have a height of 'bottom', gap pieces have a height of 'top'.
@@ -279,7 +283,20 @@ def set_z(polyline, z):
 
     return [p + [z] for p in polyline]
 
-def mirror_x(contour, closed=True):
+def mirror_y(contour, closed):
+    """Returns a polygon with mirrored y coordinates, i.e. mirrored across x axis."""
+    if len(contour[0]) > 2:
+        r = [[p[0], -p[1], p[2]] for p in contour]
+    else:
+        r = [[p[0], -p[1]] for p in contour]
+
+    if closed:
+        r = reverse(r)
+
+    return r
+
+
+def mirror_x(contour, closed):
     """Returns a polygon with mirrored x coordinates, i.e. mirrored across y axis."""
     if len(contour[0]) > 2:
         r = [[p[0] * -1.0, p[1], p[2]] for p in contour]
@@ -318,7 +335,7 @@ def left(poly):
     """Returns the lowest X value of the polygon points."""
     return min([p[0] for p in poly])
 
-def pairs(l, closed=True):
+def pairs(l, closed):
     """
     Generates pairs of items from a list.  Can be used to generate pairs of points around a polyline.
     Will pair the last item with the first if 'closed' is True (the default).
@@ -335,7 +352,7 @@ def area(poly):
 
     a = 0.0
 
-    for pair in pairs(poly):
+    for pair in pairs(poly, True):
         (x1, y1) = pair[0]
         (x2, y2) = pair[1]
 
@@ -349,7 +366,7 @@ def is_cw(poly):
 def is_ccw(poly):
     return True if area(poly) <= 0.0 else False
 
-def lengths(polyline, closed=True):
+def lengths(polyline, closed):
     """
     Returns the points of the provided line along with the distance along the line at that point in the format (point, length at that point).
     """
@@ -363,16 +380,17 @@ def lengths(polyline, closed=True):
         yield [p[1], l]
 
 
-def ramp(polyline, top, bottom, closed=True):
+def ramp(polyline, start_height, end_height, closed):
     """
     Adds a third coordinate, z, to the polyline points, from 'top' to 'bottom', proportional to the length along the line.
     Will add an extra point that is a duplicate of the first point if closed=True (the default).
     """
-
+    print 'ramping from ', start_height, end_height
     max = polyline_length(polyline, closed)
+    print 'max', max
 
     r = []
     for (p, l) in lengths(polyline, closed):
-        r.append(p + [(l/max) * (bottom - top)])
+        r.append(p + [start_height + (l/max) * (end_height - start_height)])
 
     return r
