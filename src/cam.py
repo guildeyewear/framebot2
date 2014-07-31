@@ -14,6 +14,7 @@ TOOL_DEFINITIONS = {
 FIXTURE_DEFINITIONS = {
         "default": "G54",
         "blank_clamp": "G55",
+        "lens_clamp" : "G56"
         };
 PIN_DEFINITIONS = {
         "stock_clamp": "P03",
@@ -107,8 +108,8 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
         tool_radius = abs(tool_radius)
     else:
         tool_radius = -(abs(tool_radius))
-    start_y = start_y + tool_radius
-    end_y = end_y - tool_radius
+    #start_y = start_y - tool_radius
+    #end_y = end_y + tool_radius
 
     direction = 1
     if start_x < end_x:
@@ -118,8 +119,7 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
         direction = -1
     start_x = start_x + tool_radius
     end_x = end_x - tool_radius
-    x_stepover = tool_radius * 1.75  # Sign of tool_radius depends on start_x compare just before
-
+    x_stepover = tool_radius * 1.35   # Sign of tool_radius depends on start_x compare just before
 
     start = [start_x, start_y]
     current_loc = [start[0], start[1]]
@@ -128,8 +128,6 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
             [current_loc[0], end_y]]
     current_loc[1] = end_y
 
-    print current_loc[0] + tool_radius
-    print end_x
     while (current_loc[0] + tool_radius)*direction  < end_x*direction:
         # Step over
         current_loc[0] = current_loc[0] + x_stepover
@@ -150,9 +148,6 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
     else:
         current_loc[1] = start_y
     path = path + [[current_loc[0], current_loc[1]]]
-    print(path)
-
-    print start
     return [
         rmp(start + [depth], retract=50),
         contour(path, False),
@@ -277,6 +272,13 @@ def contour(points, closed, cw=False):
         r += move(points[0]) # have to move back to start
 
     return r
+
+# Assumes cutter is in X
+def polar_contour(points):
+   return [
+        ["G1 A%f F720" % points[0][0]],
+        ["G1 A%f X%f" % (p[0], p[1]) for p in points],
+           ]
 
 def pocket(contours, bottom, retract=5.0):
     '''Poor man's pocket routine.  Runs a series of contours at depth to create a pocket.'''

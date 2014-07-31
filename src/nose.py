@@ -26,7 +26,7 @@ def nose_poly(r, h, sa, ra, xfloor, erode=0.0, depth=0.0):
     half_sa = sa / 2.0
     xfloor = float(xfloor)
     depth = float(depth)
-    depth_displacement = math.cos(((1.0/4.0) * tau) - ra) * -depth
+    depth_displacement = -depth/math.tan(ra);
     translation = h - depth_displacement - nose_radius
     xfloor -= translation
 

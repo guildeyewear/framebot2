@@ -8,6 +8,7 @@ import cam
 import hinges
 import math
 import nose
+import geometry as g
 
 def log(message):
     sys.stdout.write(message + "\n")
@@ -19,36 +20,156 @@ def main():
                       help="read specification from INFILE", metavar="INFILE")
     parser.add_option("-u", "--url", dest="url",
                       help="read specification from URL", metavar="URL")
-
     (options, args) = parser.parse_args()
-
     if options.infile == None and options.url == None:
         log("Insufficient arguments.")
         parser.print_help()
         sys.exit(0)
-
     infile = open(options.infile) if options.infile else urllib.urlopen(options.url)
     o = json.loads(infile.read())
 
-    # Create a dxf for cutting the outline on the laser cutter
+    # Create the output director
     order_id = o.get("order_id") or "testorder"
     order_dir = "/Users/rodfrey/Dropbox/guild_orders/" + order_id
     if not os.path.exists(order_dir):
         os.makedirs(order_dir)
 
-    create_dxf(order_dir + "/face_contour.dxf", [o['face_con']])
 
     # Create the milling program for the lens holes/groove, hinge pockets, etc.
+    # and the dxf for the laser for the fronts
     mill_fronts(order_dir, o)
+    # Rearrange the face curve a bit so the laser starts outside the curve.
+    # Otherwise it leaves a little scar where it starts.
+    laser_face = poly.new_start(o['face_con'], poly.leftmost_index(o['face_con']))
+    laser_face.append(laser_face[0]) # Close the curve
 
+    first_vector = [laser_face[1][0]-laser_face[0][0], laser_face[1][1]-laser_face[0][1]]
+    unit = math.sqrt(first_vector[0]**2 + first_vector[1]**2)
+    leadin_vector = [(4*first_vector[0])/unit,(4*first_vector[1])/unit]
+    leadin_start = [laser_face[0][0] - leadin_vector[0], laser_face[0][1] - leadin_vector[1]]
+
+    last_vector = [laser_face[-2][0]-laser_face[-1][0], laser_face[-2][1]-laser_face[-1][1]]
+    unit = math.sqrt(last_vector[0]**2 + last_vector[1]**2)
+    leadout_vector = [(4*last_vector[0])/unit,(4*last_vector[1])/unit]
+    leadout_end = [laser_face[-1][0] + leadout_vector[0], laser_face[-1][1] + leadout_vector[1]]
+
+
+#    rise = laser_face[0][0] - laser_face[1][0]
+#    run = laser_face[0][1] - laser_face[1][1]
+#    slope = rise/run
+#    leadin = 4.0
+#    leadin_y = math.sqrt((leadin*leadin)/(1+slope*slope))
+#    leadin_x = slope*leadin_y
+#    leadin_point =  [leadin_x+laser_face[0][0], leadin_y+laser_face[0][1]]
+
+    laser_face.insert(0, leadin_start)
+#    laser_face.append(leadout_end)
+
+#    leadout = 4.0
+#    rise = laser_face[-2][0] - laser_face[-1][0]
+#    run = laser_face[-2][1] - laser_face[-1][1]
+#    slope = rise/run
+#    leadout_y = math.sqrt((leadin*leadin)/(1+slope*slope))
+#    leadout_x = slope*leadin_y
+#    leadout_point =  [laser_face[-1][0]-leadout_x, laser_face[-1][1]-leadout_y]
+#    laser_face.append(leadout_point)
+    create_dxf(order_dir + "/face_contour.dxf", [laser_face], close=False)
+
+
+    # Arrange the temples to fit on the stock
     temples =  arrange_temple_curves(o['ltemple_con'], o['rtemple_con'], o['lhinge'], o['lhinge_y'], o['rhinge_y'])
     create_dxf(order_dir + "/temple_contour.dxf",
-            [temples['left_temple_contour'],
-            temples['right_temple_contour']])
-    mill_temples(order_dir, temples);
+            [poly.rotate_90(temples['left_temple_contour']),
+                poly.rotate_90(temples['right_temple_contour'])],
+            True)
+    mill_temples(order_dir, temples)
 
-    #create_dxf("/Users/rodfrey/Dropbox/temple_contour.dxf", [temples['left_temple_contour'], temples['right_temple_contour']])
-    #mill_temples(outdir, temples, o['temple_length'])
+#    mill_lenses(order_dir, o)
+
+
+def mill_lenses(outdir, order):
+    def to_polar(polyline):
+        return [[-math.sqrt(p[0]**2 + p[1]**2), math.degrees(math.atan2(p[1],p[0])) + 180] for p in polyline]
+
+    """ Creates g-code for milling the left and right lenses for the frames."""
+    lens = g.Polygon(order['lhole_con'])
+    x = lens.bounding_box()
+    box = lens.bounding_box()
+    center = g.Point((box.p2.x+box.p1.x)/2, (box.p2.y+box.p1.y)/2)
+    shift_to_origin = g.Vector(-center.x, -center.y)
+    lens = g.translate_polygon(lens, shift_to_origin)
+    polar = g.polygon_to_uniform_polar(lens, 1500)
+
+    # Inflate the polar form by 1/2 the diameter of the cutter, and convert
+    # the angles to degrees
+    tau = math.pi * 2
+    conv = 360/tau
+    roughing = [(pt.theta*conv, pt.r+4.77) for pt in polar]
+
+    # Expand for the roughing cut
+#    left_lens_rough = poly.dilate(4.77, left_lens)
+    # Convert to polar coordinates
+#    left_lens_roughing_polar = to_polar(left_lens_rough)
+    # Start the cut from 0 degrees
+#    angle_list = [p[1] for p in left_lens_roughing_polar]
+#    zero_idx = angle_list.index(min(angle_list))
+#    left_lens_roughing_polar = left_lens_roughing_polar[zero_idx:] + left_lens_roughing_polar[:zero_idx]
+    # Cut it down to every 0.2 degrees
+#    coarse = []
+#    for idx, pt in enumerate(left_lens_roughing_polar):
+#        if idx == 0 or (pt[1]-coarse[-1][1]) >= 0.2:
+#            coarse.append(pt)
+
+    # The polar distances aren't correct quite.  That's because the conversion assumed a flat
+    # surface, but we'll actually be bending that contour around a sphere.  The lens is already
+    # spherical.  So we need to adjust inwards a bit to account for the x distance actually being an arc
+    # distance.
+
+    # The radius of the sphere is 88mm (base 6 lens).  ArcLength = Radius * angle, and chord
+    # length is sin(angle) * radius.
+    roughing = [(p[0], math.sin(-p[1]/88) * 88) for p in roughing]
+    roughing.sort(key=lambda pt: pt[0])
+    closest = max([p[1] for p in roughing])
+    if abs(closest) < 22.5:
+        print "Error!  Cannot cut lens, it's too small.", closest
+
+    roughing_reversed = [[-1*(math.degrees(-math.radians(p[1]))+360), p[1]] for p in roughing]
+
+    program = [
+        cam.setup(),
+        cam.select_fixture("lens_clamp"),
+        cam.retract_spindle(),
+        cam.change_tool("1/4in endmill"),
+        cam.start_spindle(20000),
+        cam.rapid([-50, 0]),
+        ["G1 Z0 F500"],
+        cam.polar_contour(roughing),
+        ["G1 X-50"],
+        ["G1 A0"],
+        cam.stop_spindle(),
+        cam.retract_spindle(),
+        cam.end_program(),
+    ]
+    open(outdir + "/left_lens.ngc", "w").write(to_string(program))
+    program = [
+        cam.setup(),
+        cam.select_fixture("lens_clamp"),
+        cam.retract_spindle(),
+        cam.change_tool("1/4in endmill"),
+        cam.start_spindle(20000),
+        cam.rapid([-50, 0]),
+        ["G1 Z0 F500"],
+        cam.polar_contour(roughing_reversed),
+        ["G1 X-50"],
+        ["G1 A0"],
+        cam.stop_spindle(),
+        cam.retract_spindle(),
+        cam.end_program(),
+    ]
+    open(outdir + "/right_lens.ngc", "w").write(to_string(program))
+
+
+
 
 
 def mill_fronts(outdir, order):
@@ -58,31 +179,24 @@ def mill_fronts(outdir, order):
 
 #TODO: Replace with information in materials database
 # Initial thickness of the forward-facing lamination.  0 if no lamination.
-    front_surface_thickness = 0
+    total_thickness = 4
+    thin_front =0
+    thin_back = 0
 
-# The final desired thickness of the fronto facing lamination.  Must
-# be equal to or less than the front_surface_thickness.
-    final_front_thickness = 0
+    #back_surface_thickness = 6
 
-# Initial thickness of the face side lamination. Use this thickness only if
-# stock is solid
-    back_surface_thickness = 5
-
-# The final thickness of the left and right extremes of the frame where the
-# hinge will go.  Must be equal to or less than back_surface_thickness.
-    hinge_thickness = 4
 
 # The thickness of the highest point of the nosepad
-    nosepad_thickness = 4
+    #nosepad_thickness = 4
 
 # Final thickness of the main part of the frame.  Must be equal to or less than
 # the back_surface_thickness.
-    final_back_thickness =5
+    #final_back_thickness =6
 
-    thickness = final_front_thickness + final_back_thickness
+    #thickness = final_front_thickness + final_back_thickness
 
-    front_surface_removal = final_front_thickness - front_surface_thickness
-    back_surface_removal = final_back_thickness - back_surface_thickness
+    #front_surface_removal = final_front_thickness - front_surface_thickness
+    #back_surface_removal = final_back_thickness - back_surface_thickness
 
 
 # The machine has the stock clamp oriented 90 degrees to the way the
@@ -96,86 +210,189 @@ def mill_fronts(outdir, order):
     if msg:
         print msg
         sys.exit(0)
-
+#   Instead of offset, we'll make sure this thing is centered on the stock
     offset = frame_offset(face_c)
+    top = poly.top(face_c)
+    bottom = poly.bottom(face_c)
+    left = poly.left(face_c)
+    right = poly.right(face_c)
+    y_shift = (top + bottom)/2
+    x_shift = (left + right)/2
 
-    groove_height = back_surface_removal + (thickness/2)
+    face_c = poly.translate(face_c, -x_shift, -y_shift)
+    left_lens_c = poly.translate(left_lens_c, -x_shift, -y_shift)
+    right_lens_c = poly.translate(right_lens_c, -x_shift, -y_shift)
+
+#    groove_height = back_surface_removal + (thickness/2)
+    groove_height = -(total_thickness - thin_front - 2)
     size_info = order['usersizes']
+    #SAVI
+#    size_info['nose_radius'] = 6
+#    size_info['nose_height'] = 8
+#    size_info['nose_splayangle'] = 25
+#    size_info['nose_ridgeangle'] =36
 
-    #TEMPORARY
-    size_info['nose_radius'] = 6
-    size_info['nose_height'] = 0
-    size_info['nose_splayangle'] = 20
-    size_info['nose_ridgeangle'] = 23
+    #ROD
+#    size_info['nose_radius'] = 8
+#    size_info['nose_height'] = 8
+#    size_info['nose_splayangle'] = 38
+#    size_info['nose_ridgeangle'] =36
     program = [
         cam.setup(),
         cam.select_fixture("blank_clamp"),
         cam.retract_spindle(),
         cam.activate_pin("stock_clamp"),
-        surface_front(front_surface_removal),
-#        surface_back(back_surface_removal),
+        surface_front(thin_front),
+        surface_back(thin_back),
 
         cam.change_tool("1/8in endmill"),
         cam.rapid([0, 0]),
-        cam.temporary_offset(offset),
+#        cam.temporary_offset(offset),
 # Note that X and Y parameters in the order are switched from our system
 #TODO: replace the thickness offset with the thickness of the TEMPLE, not the fronts.
-#        index_holes([face_c], back_surface_thickness),
-        lens_holes(left_lens_c, right_lens_c, back_surface_thickness),
-        lens_groove(left_lens_c, right_lens_c, back_surface_removal - (thickness/2.0)),
-#        contour_face(
-#            back_surface_removal,
-#            back_surface_thickness - hinge_thickness,
-#            back_surface_thickness - nosepad_thickness,
-#            temple_height,
-#            face_c, left_lens_c, order['lhinge_y']),
-        face_hinge_pockets(order["lhinge"], order["lhinge_y"], order["ltemple_x"]),
+        index_holes([face_c], total_thickness),
+        lens_holes(left_lens_c, right_lens_c, total_thickness),
+        #lens_groove(left_lens_c, right_lens_c, back_surface_removal - (thickness/2.0)),
+        lens_groove(left_lens_c, right_lens_c, groove_height),
+        face_hinge_pockets(order["lhinge"], order["lhinge_y"], order["ltemple_x"], (-x_shift, -y_shift), thin_back),
 #        nose_pads(order, thickness),
-        nose_contour(size_info["nose_radius"], size_info["nose_height"], size_info["nose_splayangle"], size_info["nose_ridgeangle"], face_c, back_surface_thickness),
-#        cam.contour(face_c, True),
-        outline(face_c),
-
+        nose_contour(
+            float(size_info["nose_radius"]),
+            float(size_info["nose_height"]),
+            float(size_info["nose_splayangle"]),
+            float(size_info["nose_ridgeangle"]),
+            face_c, total_thickness,thin_back, -x_shift ),
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
+        cam.change_tool("1/8in endmill"),
+        #cam.rapid([face_c[0][0], face_c[0][1], -thin_back] ),
+        #cam.contour(face_c, True),
         cam.end_program(),
     ]
     open(outdir + "/face_stage1.ngc", "w").write(to_string(program))
 
-def outline(face_con):
+def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_back, centering_shift):
+    """Creates the nose contour feature toolpath.  Angular arguments are in degrees."""#
+    nr = nose_rad
+    nose_tool_radius = 3.175
+
+    # Set the nose height to the bottom of the bridge, but no
+    # higher than 10mm.
+    #h = min(face_con[len(face_con)/2][0], 10)
+
+    # Now the nose height will be set to the measured height, but
+    # no less than 10, or the bridge if that's less than 10
+    #h = max(h, nose_h)
+
+    #bridge_top = face_con[0][0]
+
+
+    # We're cutting with a ball-end mill.  Where it actually cuts is dependent on the
+    # ridge angle.  If you draw a line at the ridge angle and put it tangent to the ball mill,
+    # that is the cutting line.  The angle between the center of the ball mill and the intersection
+    # of the cutting line and the surface is 1/2 of the ridge angle.  From that and the radius
+    # of the ball mill we can figure out the offset.
+    cutter_offset = (nose_tool_radius)*math.tan(math.radians(nose_ra/2))
+    print "Cutter offset", cutter_offset
+    print 'nose height', nose_h
+    print 'centering shift', centering_shift
+
+    sa = math.radians(nose_sa)
+    ra = math.radians(nose_ra)
+    h = nose_h + centering_shift
+
+    xfloor = poly.left(face_con) - 3.175  # bottom most point minus tool radius
+    xfloor = max(xfloor, -27.0) # miminum safe distance without hitting clamp
+
+    z_depth = 0.5 # Start a bit above the surface of the glasses
+    nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, cutter_offset, z_depth)
+
+    r = [
+        "(Nose Contour)",
+        cam.change_tool("1/4in ballmill"),
+        cam.start_spindle(20000),
+        cam.feedrate(2000),
+        cam.rmp(nextpoly[0] + [2.0]),  # Start near our first contour
+    ]
+
+    direction = 1
+
+    z_start = int((z_depth)*10) # We have to use integers for the range, also step in 1/10 mm steps
+
+    for i in range(-z_start, int(((thickness)+3)*10)):
+        z = -i/10.0
+#        r += cam.move(nextpoly[0])
+        if(direction < 0):
+            nextpoly.reverse()
+        direction = direction * -1
+        r += cam.move([None, None, z-thin_back]) # Z adjusted for any surfacing that happened
+        r += cam.contour(nextpoly, False)
+        nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, cutter_offset, z)
+    return r
+
+
+def outline(face_con, thickness):
     """Creates the face outline feature toolpath.  face_con is the polygon representing the face outline."""
 
-    #rough = poly.reverse(poly.dilate(3.175/2.0 + 0.25, face_con)) # Reversed to have climb milling
-    rough =  poly.dilate(6.35/4.0 + 0.2, face_con)
-    #finish = poly.reverse(poly.dilate(6.35/2.0, face_con)) # Reversed to have climb milling
-    finish = poly.dilate(6.35/4.0, face_con)
+    rough =  poly.dilate(6.35/4.0 + 0.15, face_con)
+    rough_ramp = ramped_outline(rough, 0.0, -thickness+0.5, 20.0)
 
-    ramp = poly.ramp(poly.segment(rough, poly.polyline_length(rough, True) - 50.0, poly.polyline_length(rough), True), 0.0, -3.5, False)
+    finish = poly.dilate(3.175/2, face_con)
+    finish  = [p + [-thickness+0.5] for p in finish]
 
-    finishramp = poly.ramp(poly.segment(finish, poly.polyline_length(finish) - 50.0, poly.polyline_length(finish), True), 0.0, -4.5, False)
-    tab_lengths = poly.intercepts(finish, True, y=[-39.0, 39.0])
-#    tab_lengths = poly.intercepts(finish, y=[0])
-    finish_and_tabs = poly.make_gaps(finish, tab_lengths, 10, -4.2, -5.2, True)
+    tabs = poly.dilate(3.175/2+0.05, face_con)
+    add_tabs(tabs, -thickness-1,-thickness+0.3, 12, 6)
 
+    #return poly.ramp(poly.segment(polyline, poly.polyline_length(polyline) - lead_length, poly.polyline_length(polyline), True), top, bottom, False)
+#    roughing_depth = -thickness + 0.5;
+#    finish_depth = -thickness + 0.1;
+
+#    finish_ramp = poly.ramp(poly.segment(finish, poly.polyline_length(finish) - 50.0, poly.polyline_length(finish), True), 0.0, finish_depth, False)
+
+#    tab_lengths = poly.intercepts(finish, True, y=[-39.0, 39.0])
+#    finish_and_tabs = poly.make_gaps(finish, tab_lengths, 12, finish_depth+1.5, finish_depth, True)
+
+#    left_temple_rough = poly.dilate(3.175/2.0 + 0.1, l_temple)
+#    right_temple_rough = poly.dilate(3.175/2.0 + 0.1, r_temple)
+
+#    left_temple_ramp = ramped_outline(left_temple_rough, 0.0, -thickness+0.5, 10.0)
+#    right_temple_ramp = ramped_outline(right_temple_rough, 0.0, -thickness+0.5, 10.0)
+#
+#    left_temple_finish = poly.dilate(3.175/2.0, l_temple)
+#    right_temple_finish = poly.dilate(3.175/2.0, r_temple)
+#    left_temple_finish = [p + [-thickness+0.5] for p in left_temple_finish]
+#    right_temple_finish = [p + [-thickness+0.5] for p in right_temple_finish]
+
+#    left_temple_tabs = poly.dilate(3.175/2.0+0.05, l_temple)
+#    right_temple_tabs = poly.reverse(poly.dilate(3.175/2.0+0.05, r_temple))
+#    add_tabs(left_temple_tabs, -thickness-1, -thickness+0.3, 10, 6)
+#    add_tabs(right_temple_tabs, -thickness-1, -thickness+0.3, 10, 6)
+
+#
     r = [
         "(Outline Rough)",
         cam.feedrate(1500),
         cam.change_tool("1/8in endmill"),
         cam.start_spindle(22000),
-
+        cam.dwell(5),
         # Ramp in
-        cam.rmp(ramp[0]),
-        cam.contour(ramp, False),
-        cam.contour(rough, True),
+        cam.rmp(rough_ramp[0]),
+        cam.feedrate(1500),
+        cam.contour(rough_ramp, False),
+        cam.contour(rough, False),
+        cam.feedrate(700),
+        cam.contour(finish, True),
+        cam.contour(tabs, True),
+#        cam.contour(rough, True),
 
         "(Outline Finish and Tabs)",
-        cam.feedrate(1500),
         #cam.change_tool(1), # 4 flute 1/8" flat
         #cam.start_spindle(4500),
 
 #        rmp(finishramp[0]),
         ["G1 Z-5"],
 #        cam.contour(finish, False),
-        cam.contour(finish_and_tabs, True),
+#        cam.contour(finish_and_tabs, True),
         cam.rapid([None, None, 20.0]),
     ]
 
@@ -347,48 +564,94 @@ def contour_face(body_removal, hinge_removal, nosepad_removal, temple_height, fa
         r = r + [ cam.contour(dilated, True),]
     return r
 
+def add_tabs(contour, base_height, tab_height, tab_width, count):
+    for i, p in enumerate(contour):
+        contour[i] = [p[0], p[1], base_height]
+    length = poly.polyline_length(contour, True)
+    interval = length/(count+1)
+
+    def create_tab(tab_seg, height):
+        total_dist = 0
+        half = poly.polyline_length(tab_seg, False)/2
+        for i in range(len(tab_seg)-2):
+            p1 = tab_seg[i]
+            p2 = tab_seg[i+1]
+            d = poly.line_length([p1, p2])
+            total_dist += d
+            if total_dist < half:
+                adj_height = 0.5*total_dist # 30 degree slope
+                p2[2] = min(p2[2]+height, p2[2]+adj_height)
+            else:
+                adj_height = -0.5*(2*half-total_dist)
+                p2[2] = min(p2[2] + height, p2[2] - adj_height)
 
 
+    next_tab_start = interval
+    current_dist = 0
+    tabs = []
+    for i in range(len(contour)-2):
+       p1 = contour[i]
+       p2 = contour[i+1]
+       d = poly.line_length([p1, p2])
+       if current_dist < next_tab_start and (current_dist+d) > next_tab_start:
+           tabs.append([i])
+       elif current_dist > next_tab_start and (current_dist+d) > (next_tab_start+tab_width):
+           tabs[-1].append(i+1)
+           next_tab_start = next_tab_start + interval
+       current_dist += d
+    for tab in tabs:
+        tab_seg = contour[tab[0]:tab[1]]
+        create_tab(tab_seg, tab_height-base_height)
+
+def ramped_outline(polyline, top, bottom, lead_length):
+    return poly.ramp(poly.segment(polyline, poly.polyline_length(polyline) - lead_length, poly.polyline_length(polyline), True), top, bottom, False)
 
 
-
-def mill_temples(outdir, temples):
+def mill_temples(outdir, temples, thickness=4):
 #TODO: Replace with information in materials database
-    front_surface_thickness = 0
-    back_surface_thickness = 4
-    final_front_thickness = 0
-    final_back_thickness = 4
-    thickness = final_front_thickness + final_back_thickness
-
-    front_surface_removal = final_front_thickness - front_surface_thickness
-    back_surface_removal = final_back_thickness - back_surface_thickness
+    total_thickness = 4
+    thin_front = 0
+    thin_back = 0
 
     r_temple = temples['right_temple_contour']
     l_temple = temples['left_temple_contour']
-    def ramped_outline(polyline, top, bottom, lead_length):
-        return poly.ramp(poly.segment(polyline, poly.polyline_length(polyline) - lead_length, poly.polyline_length(polyline), True), top, bottom, False)
 
-    def tabbed_outline(polyline, top, bottom, gap):
-        height = poly.right(polyline) - poly.left(polyline)
-        width = poly.top(polyline) - poly.bottom(polyline)
-        y_tabs = [poly.bottom(polyline) + width/3.0, poly.bottom(polyline) + 2.0*width/3.0]
-        x_tabs = [poly.left(polyline) + height/2.0]
-        tab_lengths = poly.intercepts(polyline, y=y_tabs, x=x_tabs, closed=True)
-        return poly.make_gaps(polyline, tab_lengths, gap, top, bottom, closed=True)
+#    def tabbed_outline(polyline, top, bottom, gap):
+        # Try putting 6 equally spaced tabs
+#        length = poly.polyline_length(polyline, True)
+#        interval = length/7
+#        tab_lengths = [interval*(i+1) for i in range(6)]
+#        height = poly.right(polyline) - poly.left(polyline)
+#        width = poly.top(polyline) - poly.bottom(polyline)
+#        y_tabs = [poly.bottom(polyline) + width/3.0, poly.bottom(polyline) + 2.0*width/3.0]
+#        x_tabs = [poly.left(polyline) + height/2.0]
+#        tab_lengths = poly.intercepts(polyline, y=y_tabs, x=x_tabs, closed=True)
+#        return poly.make_gaps(polyline, tab_lengths, gap, top, bottom, closed=True)
 
 
 
-    left_temple_rough = poly.dilate(3.175/2.0 + 0.1, l_temple)
-    right_temple_rough = poly.dilate(3.175/2.0 + 0.15, r_temple)
+    #left_temple_rough = poly.dilate(3.175/2.0 + 0.1, l_temple)
+    #right_temple_rough = poly.dilate(3.175/2.0 + 0.15, r_temple)
 
-    left_temple_ramp = ramped_outline(left_temple_rough, 0.0, -3.5, 10.0)
-    right_temple_ramp = ramped_outline(right_temple_rough, 0.0, -3.5, 10.0)
+#    left_temple_rough = poly.dilate(3.175/2.0 + 0.2, l_temple)
+#    right_temple_rough = poly.dilate(3.175/2.0 + 0.2, r_temple)
+#
+#    left_temple_ramp = ramped_outline(left_temple_rough, 0.0, -thickness+0.5, 10.0)
+#    right_temple_ramp = ramped_outline(right_temple_rough, 0.0, -thickness+0.5, 10.0)
+#
+#    left_temple_finish = poly.dilate(3.175/2.0, l_temple)
+#    right_temple_finish = poly.dilate(3.175/2.0, r_temple)
+#
+#    left_temple_finish = [p + [-thickness+0.5] for p in left_temple_finish]
+#    right_temple_finish = [p + [-thickness+0.5] for p in right_temple_finish]
+#
+#    left_temple_tabs = poly.dilate(3.175/2.0, l_temple)
+#    right_temple_tabs = poly.reverse(poly.dilate(3.175/2.0+0.05, r_temple))
+#    add_tabs(left_temple_tabs, -thickness-1, -thickness+0.3, 10, 6)
+#    add_tabs(right_temple_tabs, -thickness-1, -thickness+0.3, 10, 6)
 
-    left_temple_finish_1 = poly.dilate(3.175/2.0, l_temple)
-    right_temple_finish_1 = poly.reverse(poly.dilate(3.175/2.0, r_temple))
-
-    left_temple_finish = tabbed_outline(poly.dilate(3.175/2.0, l_temple), -3.5, -4.5, 6)
-    right_temple_finish = tabbed_outline(poly.reverse(poly.dilate(3.175/2.0, r_temple)), -3.5, -4.5, 6)
+#    left_temple_finish = tabbed_outline(poly.dilate(3.175/2.0, l_temple), -thickness+0.5, -thickness-0.1, 12)
+#    right_temple_finish = tabbed_outline(poly.reverse(poly.dilate(3.175/2.0, r_temple)), -thickness+0.5, -thickness-0.1, 12)
 
     offset = frame_offset(l_temple)
     program = [
@@ -396,37 +659,19 @@ def mill_temples(outdir, temples):
         cam.select_fixture("blank_clamp"),
         cam.retract_spindle(),
         cam.activate_pin("stock_clamp"),
-        surface_front(front_surface_removal),
-        surface_back(back_surface_removal),
+        surface_front(thin_front),
+        surface_back(thin_back),
+        index_holes([l_temple, r_temple], total_thickness),
         cam.change_tool("1/16in endmill"),
         cam.rapid([0,0]),
-        cam.temporary_offset(offset),
-        temple_hinge_pockets(temples),
-        cam.change_tool("1/8in endmill"),
-        #index_holes([l_temple, r_temple], thickness),
+#        cam.temporary_offset(offset), # Not needed if we center on stock and have G55 at center
+        temple_hinge_pockets(temples, thin_back),
+
         #thin_temples([l_temple, r_temple], temple_length),
 
-        cam.feedrate(1200),
-        cam.start_spindle(22000),
-        cam.rmp(left_temple_ramp[0]),
-        cam.contour(left_temple_ramp, False),
-        cam.contour(left_temple_rough, True),
-        cam.contour(left_temple_finish_1, True),
-        cam.feedrate(700),
-        cam.contour(left_temple_finish, True),
-
-        cam.feedrate(1000),
-        cam.rmp(right_temple_ramp[0]),
-        cam.contour(right_temple_ramp, False),
-        cam.contour(right_temple_rough, True),
-        cam.contour(right_temple_finish_1, True),
-        cam.feedrate(700),
-        cam.contour(right_temple_finish, True),
-
-#        outline(r_temple),
-#        outline(l_temple),
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
+        cam.change_tool("1/8in endmill"),
         cam.end_program()
     ]
     open(outdir + "/temples_milling.ngc", "w").write(to_string(program))
@@ -480,46 +725,45 @@ def thin_temples(temples, temple_length):
         cam.contour(thinning_contour_left, False),
     ]
 
-
 def surface_front(amount):
     log("Surfacing front with amount %f" % amount)
     return [
+        cam.comment("Surface front by %f mm" % amount),
         cam.flip_stock(),
-        cam.change_tool("1/4in endmill"),
-        cam.spindle_speed(20000),
-        cam.feedrate(2000),
+        cam.change_tool("3/4in surfacer"),
+        cam.spindle_speed(15000),
+        cam.feedrate(1500),
         cam.start_spindle(),
-        cam.surface_along_y(-80, -100, -5, 100, 3.175, amount),
+        cam.surface_along_y(-40, -110, 40, 110, 9.525, -amount),
         cam.stop_spindle(),
         cam.retract_spindle(),
         cam.flip_stock(),
-        ] if amount < 0 else None
+        ] if amount > 0 else None
 
 def surface_back(amount):
     return [
-        cam.change_tool("1/4in endmill"),
-        cam.spindle_speed("20000"),
+        cam.comment("Surface back by %f mm" % amount),
+        cam.change_tool("3/4in surfacer"),
+        cam.spindle_speed(15000),
+        cam.feedrate(1500),
         cam.start_spindle(),
-        cam.surface_along_y(-80, -100, -5, 100, 0.25/2, amount),
-        cam.stop_spindle(),
-        cam.retract_spindle(),
-        cam.dactivate_pin("stock_clamp"),
+        cam.dwell(5),
+        cam.surface_along_y(-40, -110, 40, 110, 9.525, -amount),
+        cam.rapid([None, None, 20]),
         ] if amount > 0 else None
 
-
-
-
-def face_hinge_pockets(hinge_num, hinge_height, temple_position):
+def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift, thin_back):
     xposition = hinge_height;
     yposition = temple_position + 4;
     left_hinge = hinges.get_hinge(hinge_num)
     right_hinge = hinges.get_hinge(hinge_num, False)
     left_translate = [xposition, yposition]
-    #left_translate = [xposition, 0]
     right_translate = [xposition, -yposition]
     #right_translate = [xposition, 0]
     # Adjust by pocket depth of hinge
-    pocket_depth = left_hinge['pocket_depth']
+    pocket_depth = left_hinge['pocket_depth']+thin_back
+    drill_depth = -thin_back-3.5
+
 
     left_contour = poly.rotate_90(left_hinge["face_contour"])
     right_contour = poly.rotate_90(right_hinge["face_contour"])
@@ -530,6 +774,11 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position):
     left_holes = poly.translate(left_holes, left_translate[0], left_translate[1])
     right_holes = poly.translate(right_holes, right_translate[0], right_translate[1])
 
+    # Now center everything on the stock
+    left_contour = poly.translate(left_contour, centering_shift[0], centering_shift[1])
+    right_contour = poly.translate(right_contour, centering_shift[0], centering_shift[1])
+    left_holes = poly.translate(left_holes, centering_shift[0], centering_shift[1])
+    right_holes = poly.translate(right_holes, centering_shift[0], centering_shift[1])
 
     if not poly.is_ccw(left_contour):
         left_contour = poly.reverse(left_contour)
@@ -553,25 +802,25 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position):
         cam.comment("Hinge Pockets"),
         cam.feedrate(750),
         cam.change_tool("1/16in endmill"),
-        cam.start_spindle(15000),
+        cam.start_spindle(20000),
         cam.dwell(3),
         cam.comment("Right Hinge Pocket"),
-        cam.pocket(right_hinge_pocket_contours, -abs(right_hinge['pocket_depth']), retract=0),
+        cam.pocket(right_hinge_pocket_contours, -abs(pocket_depth), retract=-abs(pocket_depth)),
         cam.rapid([None, None, 20.0]),
         cam.comment("Left Hinge Pocket"),
-        cam.pocket(left_hinge_pocket_contours, -abs(left_hinge['pocket_depth']), retract=0),
+        cam.pocket(left_hinge_pocket_contours, -abs(pocket_depth), retract=-abs(pocket_depth)),
         cam.rapid([None, None, 20.0]),
         cam.comment("Hinge Holes"),
         cam.change_tool("1mm drill"),
         cam.start_spindle(4500),
         cam.dwell(2),
-        [cam.rmp(p + [-3.5], retract=10.0) for p in right_holes],
-        [cam.rmp(p + [-3.5], retract=10.0) for p in left_holes],
+        [cam.rmp(p + [drill_depth], retract=10.0) for p in right_holes],
+        [cam.rmp(p + [drill_depth], retract=10.0) for p in left_holes],
         cam.rapid([None, None, 20.0]),
     ]
     return r
 
-def temple_hinge_pockets(temples):
+def temple_hinge_pockets(temples, thinned):
     # We're operating in a 90 degree rotated fixture
     #l_hinge = poly.rotate_90(temples["left_hinge_contour"])
     #r_hinge = poly.rotate_90(temples["right_hinge_contour"])
@@ -583,15 +832,20 @@ def temple_hinge_pockets(temples):
     if not poly.is_ccw(r_hinge):
         r_hinge = poly.reverse(r_hinge)
 
+    pocket_depth = temples['pocket_depth'] + thinned
+
     def pocket_contours(contour):
         contours = []
         erode = poly.erode(1.5875/2, contour)
         while len(erode) > 0:
-            if len(erode) == 1:
+            if len(contours) > 2:
+                break
+            elif len(erode) >= 1:
                 contours.append(erode[0])
             else:
-                for path in erode:
-                    contours.append(path)
+                break
+#                for path in erode:
+#                    contours.append(path)
             erode = poly.erode(1.5875/2, contours[-1])
         return contours
 
@@ -603,7 +857,6 @@ def temple_hinge_pockets(temples):
 #        if len(l_hinge) > 0:
 #            l_hinge = l_hinge[0]
 #            left_hinge_pocket_contours.append(l_hinge)
-#    print "Length of left hinge pocket contours", len(left_hinge_pocket_contours)
 #    right_hinge_pocket_contours = [];
 #    while len(r_hinge) > 0:
 #            r_hinge = poly.erode(1.5875/2, r_hinge)
@@ -612,19 +865,17 @@ def temple_hinge_pockets(temples):
 #            if len(r_hinge) > 0:
 #                r_hinge = r_hinge[0]
 #                right_hinge_pocket_contours.append(r_hinge)
-#    print "Length of right hinge pocket contours", len(right_hinge_pocket_contours)
-#    print right_hinge_pocket_contours
     r = [
         cam.comment("Hinge Pockets"),
         cam.feedrate(750),
         cam.change_tool("1/16in endmill"),
-        cam.start_spindle(15000),
-        cam.dwell(3),
+        cam.start_spindle(22000),
+        cam.dwell(5),
         cam.comment("Right Hinge Pocket"),
-        cam.pocket(right_hinge_pocket_contours, -abs(temples['pocket_depth']), retract=0),
+        cam.pocket(right_hinge_pocket_contours, -abs(pocket_depth), retract=0),
         cam.rapid([None, None, 20.0]),
         cam.comment("Left Hinge Pocket"),
-        cam.pocket(left_hinge_pocket_contours, -abs(temples['pocket_depth']), retract=0),
+        cam.pocket(left_hinge_pocket_contours, -abs(pocket_depth), retract=0),
         cam.rapid([None, None, 20.0]),
         cam.comment("Hinge Holes"),
         cam.change_tool("1mm drill"),
@@ -633,10 +884,6 @@ def temple_hinge_pockets(temples):
         [cam.rmp(p + [-8.0], retract=10.0) for p in temples['right_hinge_holes']],
         [cam.rmp(p + [-8.0], retract=10.0) for p in temples['left_hinge_holes']],
         cam.rapid([None, None, 20.0]),
-
-        #cam.move([None, None, 0]),
-        #cam.contour(poly.rotate_90(temples['left_temple_contour']), True),
-        #cam.contour(poly.rotate_90(temples['right_temple_contour']), True),
     ]
     return r
 
@@ -644,22 +891,21 @@ def temple_hinge_pockets(temples):
 
 def lens_groove(left_c, right_c, height):
     """Generates the toolpath for the lens holes (holes, groove and tabs)."""
-    print 'GROOVE HEIGHT', height
     if not poly.is_ccw(left_c):
         left_c = poly.reverse(left_c)
     if not poly.is_ccw(right_c):
         right_c = poly.reverse(right_c)
-    print 'offsetting lens contours'
-    lgroove = poly.erode(0.8, left_c)[0]
-    rgroove = poly.erode(0.8, right_c)[0]
 
-    print 'offsetting lens countours for entry'
+    lgroove = poly.erode(0.85, left_c)[0]
+    rgroove = poly.erode(0.85, right_c)[0]
+
     left_entry = poly.erode(7.0, left_c)[0][0];
     right_entry = poly.erode(7.0, right_c)[0][0];
     r = [
         "(Lens Grooves)",
         cam.change_tool("vgroove"),
         cam.start_spindle(20000),
+        cam.dwell(5),
         cam.feedrate(2000),
         cam.rmp(right_entry + [height]),
         cam.contour(rgroove, True),
@@ -678,25 +924,25 @@ def lens_holes(left_c, right_c, thickness):
     if not poly.is_ccw(right_c):
         right_c = poly.reverse(right_c)
 
-    drawing = dxf.drawing('test.dxf')
-    drawing.add_layer('OUTLINE', color=1)
-    polyline = dxf.polyline(layer="OUTLINE")
-    polyline.add_vertices(left_c)
-    drawing.add(polyline)
+#    drawing = dxf.drawing('test.dxf')
+#    drawing.add_layer('OUTLINE', color=1)
+#    polyline = dxf.polyline(layer="OUTLINE")
+#    polyline.add_vertices(left_c)
+#    drawing.add(polyline)
 
 
     lhole = poly.erode(3.175/2.0, left_c)[0]
     rhole = poly.erode(3.175/2.0, right_c)[0]
-    polyline = dxf.polyline(layer="OUTLINE")
-    polyline.add_vertices(lhole)
-    drawing.add(polyline)
+#    polyline = dxf.polyline(layer="OUTLINE")
+#    polyline.add_vertices(lhole)
+#    drawing.add(polyline)
 
 
     right_rough = poly.erode(0.1, rhole)[0]
     left_rough = poly.erode(0.1, lhole)[0]
 
-    lgroove = poly.erode(0.8, left_c)[0]
-    rgroove = poly.erode(0.8, right_c)[0]
+    #lgroove = poly.erode(0.8, left_c)[0]
+    #rgroove = poly.erode(0.8, right_c)[0]
 
     left_entry = poly.erode(5.0, left_c)[0][0];
     right_entry = poly.erode(5.0, right_c)[0][0];
@@ -707,13 +953,16 @@ def lens_holes(left_c, right_c, thickness):
     r = [
         "(Lens Holes)",
         cam.change_tool("1/8in endmill"),
-        cam.start_spindle(20000),
+        cam.start_spindle(22000),
         cam.feedrate(2000),
         cam.rmh(right_entry + [-thickness - 1.0], 1.5, 0.5, 1.0),
         cam.contour(right_rough, True),
+        cam.feedrate(1000),
         cam.contour(rhole, True),
+        cam.feedrate(2000),
         cam.rmh(left_entry + [-thickness - 1.0], 1.5, 0.5, 1.0),
         cam.contour(left_rough, True),
+        cam.feedrate(1000),
         cam.contour(lhole, True),
 
     ]
@@ -727,6 +976,25 @@ def index_holes(contours, thickness):
 #    log(str((poly.right(face_c) - poly.left(face_c))/2))
 #    log(str(poly.right(face_c) - (poly.right(face_c) - poly.left(face_c))/2))
 
+# EXPERIMENTAL:  Just mill the index holes on the 0 line.  It's the responsibility
+# of the milling programs to make sure the contour is in the correct location
+# with respect to the index holes.
+    hole_radius = 4.85/2 # Measured from dowel pin
+    tool_radius = 3.175/2
+    helix_radius = hole_radius - tool_radius
+    r = [
+        cam.comment("Index holes for secondary operations"),
+        cam.change_tool("1/8in endmill"),
+        cam.start_spindle(22000),
+        cam.feedrate(1000),
+        cam.dwell(5),
+        cam.rmh([0, 90, -thickness - 1.0], helix_radius, 0.5, 1),
+        cam.rmh([0, -90, -thickness - 1.0], helix_radius, 0.5, 1),
+        ]
+    return r
+# END experimental code
+
+# START pre-experiment code
     rightmost = -1000000
     leftmost = 1000000
     for contour in contours:
@@ -738,15 +1006,13 @@ def index_holes(contours, thickness):
 #    x_offset = poly.right(face_c) - (poly.right(face_c) - poly.left(face_c))/2
     x_offset = rightmost - (rightmost - leftmost)/2
 
-    hole_radius = 4.85/2 # Measured from dowel pin
-    tool_radius = 3.175/2
-    helix_radius = hole_radius - tool_radius
     r_hole = [x_offset, 90]
     l_hole = [x_offset, -90]
+
     r = [
         cam.comment("Index Holes for secondary operations"),
         cam.change_tool("1/8in endmill"),
-        cam.start_spindle(15000),
+        cam.start_spindle(20000),
         cam.feedrate(1000),
         cam.dwell(3),
         cam.rmh(r_hole + [-thickness - 1.0], helix_radius, 0.5, 1),
@@ -758,47 +1024,6 @@ def index_holes(contours, thickness):
 def nose_pads(order, thickness):
     return []
 
-def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness):
-    """Creates the nose contour feature toolpath.  Angular arguments are in degrees."""
-
-    nr = nose_rad
-    # Find the lower height of the bridge
-    h = face_con[len(face_con)/2][0] + 1
-    print 'face contour lower point', h
-    print 'face contour upper point', face_con[0][0]
-    # Offset so that the ridge slope ends somewhere around the front
-    ridge_offset = thickness/math.tan(math.radians(90 - nose_ra))
-    print 'ridge offset', ridge_offset, nose_ra
-    h = h + ridge_offset + nose_h + 3.175
-    print 'final height', h
-    sa = math.radians(nose_sa * 2)
-    ra = math.radians(nose_ra)
-    xfloor = poly.left(face_con) - 3.175  # bottom most point minus tool radius
-    xfloor = max(xfloor, -27.0) # miminum safe distance without hitting clamp
-    nose_tool_radius = 3.175
-
-    nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, nose_tool_radius, 0.0)
-
-    r = [
-        "(Nose Contour)",
-        cam.change_tool("1/4in ballmill"),
-        cam.start_spindle(20000),
-        cam.feedrate(2000),
-        cam.rmp(nextpoly[0] + [2.0])  # Start near our first contour
-    ]
-
-    direction = 1
-    for i in range(-5, (thickness+2)*10 +5):
-        z = -i/10.0
-#        r += cam.move(nextpoly[0])
-        if(direction < 0):
-            nextpoly.reverse()
-        direction = direction * -1
-        r += cam.contour(nextpoly, False)
-        r += cam.move([None, None, z])
-        nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, nose_tool_radius, z)
-
-    return r
 
 def arrange_temple_curves(left_temple_contour, right_temple_contour, hinge, lhinge_y, rhinge_y):
     left_hinge = hinges.get_hinge(hinge)
@@ -860,33 +1085,35 @@ def arrange_temple_curves(left_temple_contour, right_temple_contour, hinge, lhin
     right_holes = poly.translate(right_holes, 0, -optimization_offset)
     # Translate left one rightward as much as we can
     total_width = poly.left(right_temple_contour) - poly.right(left_temple_contour)
-    print "Width before packing", total_width
     for i in range(1, 100):
         candidate = poly.translate(right_temple_contour, i, 0)
         intersection = poly.intersection(candidate, left_temple_contour)
         if len(intersection) > 0:
-            right_temple_contour = poly.translate(right_temple_contour, i-15, 0)
-            right_hinge_contour = poly.translate(right_hinge_contour, i-15, 0)
-            right_holes = poly.translate(right_holes, i-15, 0)
+            right_temple_contour = poly.translate(right_temple_contour, i-5, 0)
+            right_hinge_contour = poly.translate(right_hinge_contour, i-5, 0)
+            right_holes = poly.translate(right_holes, i-5, 0)
             break
 
     # sanity check that we fit on stock
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
-    print "Width after packing", total_width
-    if total_width > 60:
-        print 'Error! temples did not pack tight enough.'
+    if total_width > 65:
+        print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
     # Now they're packed togegther OK but not centred on the stock
     #Midpoint of curves should be 0, so that's how much we'll shift it
-    centering_shift = poly.bottom(right_temple_contour) + (poly.top(left_temple_contour) - poly.bottom(right_temple_contour))/2.0
+    y_centering_shift = poly.bottom(right_temple_contour) + (poly.top(left_temple_contour) - poly.bottom(right_temple_contour))/2.0
+    x_centering_shift = (poly.right(left_temple_contour) + poly.left(right_temple_contour))/2;
 
-    left_temple_contour = poly.translate(left_temple_contour, 0, -centering_shift)
-    right_temple_contour = poly.translate(right_temple_contour, 0, -centering_shift)
-    left_hinge_contour = poly.translate(left_hinge_contour, 0, -centering_shift)
-    right_hinge_contour = poly.translate(right_hinge_contour, 0, -centering_shift)
-    left_holes = poly.translate(left_holes, 0, -centering_shift)
-    right_holes = poly.translate(right_holes, 0, -centering_shift)
-    centering_shift = (poly.top(left_temple_contour) - poly.bottom(right_temple_contour))/2.0
+
+
+    left_temple_contour = poly.translate(left_temple_contour, -x_centering_shift, -y_centering_shift)
+    right_temple_contour = poly.translate(right_temple_contour, -x_centering_shift, -y_centering_shift)
+    left_hinge_contour = poly.translate(left_hinge_contour, -x_centering_shift, -y_centering_shift)
+    right_hinge_contour = poly.translate(right_hinge_contour, -x_centering_shift, -y_centering_shift)
+    left_holes = poly.translate(left_holes, -x_centering_shift, -y_centering_shift)
+    right_holes = poly.translate(right_holes, -x_centering_shift, -y_centering_shift)
+
+
     return {
         "pocket_depth": left_hinge['pocket_depth'],
         "left_hinge_contour": left_hinge_contour,
@@ -899,15 +1126,29 @@ def arrange_temple_curves(left_temple_contour, right_temple_contour, hinge, lhin
 
 
 
-def create_dxf(filename, polys):
+def create_dxf(filename, polys, close=False, arc=False):
     drawing = dxf.drawing(filename)
     drawing.add_layer('OUTLINE', color=1)
+
     for p in polys:
+        if arc:
+            first_vector = [p[1][0]-p[0][0], p[1][1]-p[0][1]]
+            norm = math.sqrt(first_vector[0]**2 + first_vector[1]**2)
+            angle = math.degrees(math.acos(first_vector[0]/norm))
+            # make the arc 5 mm radius
+            orthogonal = [5*(first_vector[1]/norm), -5*(first_vector[0]/norm)]
+            arc_center = [p[0][0] + orthogonal[0], p[0][1] + orthogonal[1]]
+            line = dxf.line(p[0], arc_center, layer="OUTLINE")
+            drawing.add(line)
+            arc_in = dxf.arc(5.0, arc_center, 0, angle, layer="OUTLINE")
+            drawing.add(arc_in)
+
+
         polyline = dxf.polyline(layer="OUTLINE")
-        p = p + [p[0], p[1]]  # Close the polygon to avoid a cusp
+        if close:
+            p = p + [p[0], p[1]]  # Close the polygon to avoid a cusp
         polyline.add_vertices(p)
         drawing.add(polyline)
-
     drawing.save()
 
 def check_frame_size(contour):

@@ -2,7 +2,10 @@
 
 import math
 import pyclipper
+import sys
+from cStringIO import StringIO
 from decimal import Decimal
+
 tau = math.pi * 2.0  # That's right, I said it
 
 """
@@ -16,10 +19,13 @@ It will also enable some interesting functionality, like tab-every-inch-of-polyl
 """
 
 def intersection(poly1, poly2):
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
     c = pyclipper.Pyclipper()
     c.add_polygon(poly1)
     c.sub_polygon(poly2)
     result = c.execute(0)
+    sys.stdout = old_stdout
     return result
 
 def line_length(line):
@@ -133,23 +139,30 @@ def scale(polygon, scale):
     return [[p[0]*scale, p[1]*scale] for p in polygon]
 
 def dilate(r, polygon):
-    scale_factor = 100.0
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+    scale_factor = 1000.0
     scaled = scale(polygon, scale_factor);
     offset = pyclipper.offset([scaled], r*scale_factor, jointype=2);
+
+    sys.stdout = old_stdout
     return [[p[0]/scale_factor, p[1]/scale_factor] for p in offset[0]];
     """Return the provided polygon, dilated by r."""
     # return m2d.run(circle(r), polygon, mode="dilate")
 
 
 def erode(r, polygon, jointype=2):
-    scale_factor = 100.0
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+    scale_factor = 1000.0
     scaled = scale(polygon, scale_factor);
     offset = pyclipper.offset([scaled], -r*scale_factor, jointype);
+    sys.stdout = old_stdout
     if len(polygon[0]) > 2:
         return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
         #return  [[[p[0]/scale_factor, p[1]/scale_factor, p[2]] for p in off] for off in offset]
     #Holes are messing us up, only return the first eroded path.
-    print 'eroded offset has', len(offset)
+
     return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
     #return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
 
@@ -248,28 +261,34 @@ def make_gaps(polyline, lengths, gap, top, bottom, closed):
     for l in sorted(lengths):
         tab_start = l - gap/2.0
         tab_end = l + gap/2.0
-        ramp_up_end = tab_start + gap/4.0
-        ramp_down_start = tab_end - gap/4.0
+#        ramp_up_end = tab_start + gap/4.0
+#        ramp_down_start = tab_end - gap/4.0
 
         free = set_z(segment(polyline, start, tab_start, False), bottom)
-        ramp_up = ramp2(segment(polyline, tab_start, ramp_up_end, False), bottom, top)
- #       tab = set_z(segment(polyline, tab_start, tab_end, closed), top)
-        tab = set_z(segment(polyline, ramp_up_end, ramp_down_start, False), top)
-        ramp_down = ramp2(segment(polyline, ramp_down_start, tab_end, False), top, bottom)
+#        ramp_up = ramp2(segment(polyline, tab_start, ramp_up_end, False), bottom, top)
+#        tab = set_z(segment(polyline, ramp_up_end, ramp_down_start, False), top)
+#        ramp_down = ramp2(segment(polyline, ramp_down_start, tab_end, False), top, bottom)
+
+        tab = set_z(segment(polyline, tab_start, tab_end, closed), top)
+        ramp_points = len(tab)/4
+        z_interval = (top-bottom) / ramp_points
+        z_levels = [i*z_interval for i in range(ramp_points)]
+        for i, z_level in enumerate(z_levels):
+            tab[i][2] = bottom + z_level
+            tab[-i][2] = bottom + z_level
 
 #        ramp2(segment(polyline, tab_start, ramp_up_end, False), bottom, top)
 
         r += free
-        r += ramp_up
+#        r += ramp_up
         r += tab
-        r += ramp_down
+#        r += ramp_down
 
         start = tab_end
 
     # Tail end
     tail = set_z(segment(polyline, start, polyline_length(polyline, closed), closed), bottom)
     r += tail
-
     return r
 
 def ramp2(polyline, start_z, end_z):
@@ -280,7 +299,6 @@ def ramp2(polyline, start_z, end_z):
 
 def set_z(polyline, z):
     """Sets the z coordinate to the polyline of 'z'."""
-
     return [p + [z] for p in polyline]
 
 def mirror_y(contour, closed):
@@ -331,9 +349,14 @@ def right(poly):
     """Returns the highest X value of the polygon points."""
     return max([p[0] for p in poly])
 
+
 def left(poly):
     """Returns the lowest X value of the polygon points."""
     return min([p[0] for p in poly])
+
+def leftmost_index(poly):
+    values = [p[0] for p in poly]
+    return values.index(min(values))
 
 def pairs(l, closed):
     """
@@ -385,9 +408,7 @@ def ramp(polyline, start_height, end_height, closed):
     Adds a third coordinate, z, to the polyline points, from 'top' to 'bottom', proportional to the length along the line.
     Will add an extra point that is a duplicate of the first point if closed=True (the default).
     """
-    print 'ramping from ', start_height, end_height
     max = polyline_length(polyline, closed)
-    print 'max', max
 
     r = []
     for (p, l) in lengths(polyline, closed):

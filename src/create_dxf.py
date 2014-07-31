@@ -40,7 +40,6 @@ def main():
 
     p2 = poly.erode(3.175/2.0, lhole)[0]
     p2 = poly.erode(2.0, p2);
-    print p2[0][0]
     poly2 = dxf.polyline(layer="OUTLINE")
     poly2.add_vertices(p2[0])
     drawing.add(poly2)
