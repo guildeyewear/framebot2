@@ -23,7 +23,7 @@ def get_hinge(pn, left=True):
     'temple_holes': make_points(temple_holes),
     """
 
-    h = json.load(open("hinges/%d.json" % pn))
+    h = json.load(open("../hinges/%d.json" % pn))
     # hinges are modelled with y in reverse orientation from the mill
 #    to_rotate = ['face_holes', 'face_contour']
 #    to_flip = ['face_holes', 'face_contour'] #, 'temple_contour']
@@ -39,12 +39,12 @@ def get_hinge(pn, left=True):
 
     # Special processing to correct for modelling errors.
 # NOTE: This is probably a result of the front plane of 6 degrees.  We must understand this better!!!
-    if pn == 1:
+#    if pn == 1:
         # Rotational angle of temple hinge is slightly off
-        h['temple_holes'] = poly.rotate(h['temple_holes'], -6)
-        h['temple_contour'] = poly.rotate(h['temple_contour'], -6)
-#        h['temple_holes'] = poly.translate(h['temple_holes'], 1, 0)
-#        h['temple_contour'] = poly.translate(h['temple_contour'], 1, 0)
+#        h['temple_holes'] = poly.rotate(h['temple_holes'], -11)
+#        h['temple_contour'] = poly.rotate(h['temple_contour'], -11)
+#        h['temple_holes'] = poly.translate(h['temple_holes'], -0.5, 0)
+#        h['temple_contour'] = poly.translate(h['temple_contour'], -0.5, 0)
 #    elif pn == 0:
 #        h['temple_holes'] = poly.translate(h['temple_holes'], -1, -1)
 #        h['temple_contour'] = poly.translate(h['temple_contour'], -1, -1)
