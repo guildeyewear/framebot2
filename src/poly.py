@@ -136,7 +136,7 @@ def rotate_90(poly, ccw=True):
         return [[-p[1], p[0]] for p in poly]
 
 def scale(polygon, scale):
-    return [[p[0]*scale, p[1]*scale] for p in polygon]
+    return [[round(p[0]*scale), round(p[1]*scale)] for p in polygon]
 
 def dilate(r, polygon):
     old_stdout = sys.stdout
@@ -152,12 +152,17 @@ def dilate(r, polygon):
 
 
 def erode(r, polygon, jointype=2):
-    old_stdout = sys.stdout
-    sys.stdout = mystdout = StringIO()
+    #old_stdout = sys.stdout
+    #sys.stdout = mystdout = StringIO()
     scale_factor = 1000.0
     scaled = scale(polygon, scale_factor);
+    if(not is_ccw(scaled)):
+        scaled = reverse(scaled)
+
     offset = pyclipper.offset([scaled], -r*scale_factor, jointype);
-    sys.stdout = old_stdout
+
+    #sys.stdout = old_stdout
+
     if len(polygon[0]) > 2:
         return  [[[p[0]/scale_factor, p[1]/scale_factor] for p in off] for off in offset]
         #return  [[[p[0]/scale_factor, p[1]/scale_factor, p[2]] for p in off] for off in offset]

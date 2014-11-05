@@ -9,6 +9,7 @@ import hinges
 import math
 import nose
 import geometry as g
+import datetime
 
 def log(message):
     sys.stdout.write(message + "\n")
@@ -18,6 +19,8 @@ def main():
     parser = OptionParser()
     parser.add_option("-i", "--infile", dest="infile",
                       help="read specification from INFILE", metavar="INFILE")
+    parser.add_option("-o", "--out", dest="outname",
+            help="Name of output director", metavar="OUTDIR")
     parser.add_option("-u", "--url", dest="url",
                       help="read specification from URL", metavar="URL")
     (options, args) = parser.parse_args()
@@ -28,9 +31,18 @@ def main():
     infile = open(options.infile) if options.infile else urllib.urlopen(options.url)
     o = json.loads(infile.read())
 
-    # Create the output director
     order_id = o.get("order_id") or "testorder"
-    order_dir = "/Users/rodfrey/Dropbox/guild_orders/" + order_id
+    if options.outname == None:
+        print "extracting out name from ", options.infile
+        outname = options.infile.split("/")[-1]
+        outname = outname.split(".")[0]
+        outname = datetime.date.today().isoformat() + "/" + outname
+        print "out file is ", outname
+    else:
+        outname = options.outname
+    # Create the output director
+    #order_dir = "/Users/rodfrey/Dropbox/guild_orders/" + outname
+    order_dir = "/Volumes/Untitled/" + outname
     if not os.path.exists(order_dir):
         os.makedirs(order_dir)
 
@@ -86,10 +98,14 @@ def main():
 
     create_dxf(order_dir + "/temple_contour.dxf",
             [poly.rotate_90(temples['left_temple_contour']),
-#            left_hinge,
-#           right_hinge,
-             poly.rotate_90(temples['right_temple_contour'])],
-            close_with_arc=True)
+             poly.rotate_90(temples['right_temple_contour']),
+#             left_hinge,
+#             right_hinge,
+            ],
+#            close_with_arc=True,
+#           right_temple_text='Custom made for Tim Sullivan',
+            close=True)
+
     mill_temples(order_dir, temples)
 
 #    mill_lenses(order_dir, o)
@@ -740,21 +756,47 @@ def thin_temples(temples, temple_length):
     ]
 
 def surface_front(amount):
-    log("Surfacing front with amount %f" % amount)
-    return [
+    if amount < 0.1:
+        print 'Not surfacing front, returning'
+        return None
+    print "Surfacing front with amount", amount
+    surface_amount = min(amount, 2)
+    surface_heights = []
+    while surface_amount <= amount:
+        surface_heights.append(surface_amount)
+        surface_amount = max(surface_amount+2, amount)
+    print "surface amounts", surface_heights
+
+    program =  [
         cam.comment("Surface front by %f mm" % amount),
         cam.flip_stock(),
         cam.change_tool("3/4in surfacer"),
         cam.spindle_speed(15000),
         cam.feedrate(1500),
-        cam.start_spindle(),
-        cam.surface_along_y(-40, -110, 40, 110, 9.525, -amount),
+        cam.start_spindle(),]
+    for height in surface_heights:
+        program = program + cam.surface_along_y(-40, -110, 40, 110, 9.525, -height)
+    program = program + [
         cam.stop_spindle(),
         cam.retract_spindle(),
         cam.flip_stock(),
-        ] if amount > 0 else None
+        ]
+    return program
 
 def surface_back(amount):
+    if amount < 0.1:
+        return None
+
+    print 'surfacing back with', amount
+    surface_amount = min(amount, 2)
+    surface_heights = []
+    while surface_amount <= amount:
+        surface_heights.append(surface_amount);
+        print surface_heights
+        surface_amount = max(surface_amount+2, amount)
+    print "surface amounts on back", surface_heights
+
+
     return [
         cam.comment("Surface back by %f mm" % amount),
         cam.change_tool("3/4in surfacer"),
@@ -765,6 +807,22 @@ def surface_back(amount):
         cam.surface_along_y(-40, -110, 40, 110, 9.525, -amount),
         cam.rapid([None, None, 20]),
         ] if amount > 0 else None
+    program =  [
+        cam.comment("Surface back by %f mm" % amount),
+        cam.change_tool("3/4in surfacer"),
+        cam.spindle_speed(15000),
+        cam.feedrate(1500),
+        cam.start_spindle(),
+        cam.dwell(5),
+        ]
+    for height in surface_heights:
+        program = program + cam.surface_along_y(-40, -110, 40, 110, 9.525, -height),
+    program = program + [
+        cam.stop_spindle(),
+        cam.retract_spindle(),
+        ]
+    return program
+
 
 def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift, thin_back):
     xposition = hinge_height;
@@ -776,8 +834,9 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
     #right_translate = [xposition, 0]
     # Adjust by pocket depth of hinge
     #pocket_depth = left_hinge['pocket_depth']+thin_back
-    pocket_depth =1 + thin_back
-    drill_depth = -thin_back-2.0
+
+    pocket_depth = 1 + thin_back
+    drill_depth = -thin_back - 2.0
 
     left_contour = poly.rotate_90(left_hinge["face_contour"])
     right_contour = poly.rotate_90(right_hinge["face_contour"])
@@ -948,7 +1007,9 @@ def lens_holes(left_c, right_c, thickness):
 
 
     lhole = poly.erode(tool_radius/2.0, left_c)[0]
-    rhole = poly.erode(tool_radius/2.0, right_c)[0]
+    print 'left hole eroded', lhole[0], lhole[-1]
+    rhole = poly.erode(tool_radius/2.001, right_c);
+    rhole = rhole[0]
 #    polyline = dxf.polyline(layer="OUTLINE")
 #    polyline.add_vertices(lhole)
 #    drawing.add(polyline)
@@ -1143,7 +1204,7 @@ def arrange_temple_curves(left_temple_contour, right_temple_contour, hinge, lhin
 
 #    # sanity check that we fit on stock
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
-    if total_width > 65:
+    if total_width > 80:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
 
@@ -1178,13 +1239,13 @@ def arrange_temple_curves(left_temple_contour, right_temple_contour, hinge, lhin
 
 
 
-def create_dxf(filename, polys, close=False, close_with_arc=False):
+def create_dxf(filename, polys, close=False, close_with_arc=False, right_temple_text=None):
     drawing = dxf.drawing(filename)
     drawing.add_layer('OUTLINE', color=1)
+    drawing.add_layer('TEXT', color=2)
 
     for p in polys:
         polyline = dxf.polyline(layer="OUTLINE", thickness=0.1)
-
         if close:
             p = p + [p[0], p[1]]  # Close the polygon to avoid a cusp
         elif close_with_arc and p[0] != p[-1]:
@@ -1200,7 +1261,7 @@ def create_dxf(filename, polys, close=False, close_with_arc=False):
             vect = (p[-1][0]-p[0][0], p[-1][1]-p[0][1])
             scale = (vect[0]**2 + vect[1]**2) ** 0.5
             unit_vect = (vect[0]/scale, vect[1]/scale)
-            vect = (unit_vect[0]*79, unit_vect[1]*79)
+            vect = (unit_vect[0]*88, unit_vect[1]*88)
             vect = (vect[1], -vect[0])
             center_point = (center_point[0]+vect[0], center_point[1]+vect[1])
 
@@ -1212,13 +1273,46 @@ def create_dxf(filename, polys, close=False, close_with_arc=False):
             print 'angle of p0', math.degrees(angle1)
             print 'angle of pn1', math.degrees(angle2)
 
-            drawing.add(dxf.arc(radius, center_point, math.degrees(angle2), math.degrees(angle1)))
-
-
+            drawing.add(dxf.arc(radius, center_point, math.degrees(angle2), math.degrees(angle1), layer="OUTLINE", thickness=0.1))
 
 
         polyline.add_vertices(p)
         drawing.add(polyline)
+
+    if right_temple_text:
+        p = polys[1]
+        insertion_point = (
+                p[-1][0] + (p[0][0]-p[-1][0])/2,
+                p[-1][1] + (p[0][1]-p[-1][1])/2)
+
+        vect = (p[-1][0]-p[0][0], p[-1][1]-p[0][1])
+        scale = (vect[0]**2 + vect[1]**2) ** 0.5
+        unit_vect = (vect[0]/scale, vect[1]/scale)
+        vect = (unit_vect[0]*15, unit_vect[1]*15)
+        vect = (vect[1], -vect[0])
+        insertion_point = (insertion_point[0]+vect[0], insertion_point[1]+vect[1]-1)
+
+        bottom_vect = (p[100][0]-p[0][0], p[100][1]-p[0][1])
+        text_angle = math.atan2(bottom_vect[1], bottom_vect[0])
+        print 'text angle', text_angle
+        txt = dxf.text(
+                right_temple_text,
+                insertion_point,
+                rotation=math.degrees(text_angle),
+                style="ARIAL",
+                layer="TEXT",
+                height=2.0
+                )
+        txt2 = dxf.text(
+                "made with love by GUILD eyewear",
+                (insertion_point[0]+0.5, insertion_point[1]-3),
+                style="TIMES",
+                rotation=math.degrees(text_angle),
+                layer="TEXT",
+                height=2.0
+                )
+        drawing.add(txt);
+    #    drawing.add(txt2);
     drawing.save()
 
 def check_frame_size(contour):
