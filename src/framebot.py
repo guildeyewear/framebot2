@@ -103,11 +103,11 @@ def main():
     create_dxf(order_dir + "/temple_contour.dxf",
             [poly.rotate_90(temples['left_temple_contour']),
              poly.rotate_90(temples['right_temple_contour']),
-            # left_hinge,
-            # right_hinge,
+#             left_hinge,
+#             right_hinge,
             ],
             close_with_arc=False,
-            close=True)
+            close=False)
 
     mill_temples(order_dir, temples, o)
 
@@ -206,10 +206,15 @@ def mill_fronts(outdir, order):
 
 # Initial thickness of the forward-facing lamination.  0 if no lamination.
     print 'Creating milling program for frame fronts'
-    top_thickness = order["face_material"].get("top_thickness")
-    bottom_thickness = order["face_material"].get("bottom_thickness") or 0
-    top_raw = order["face_material"].get("top_raw_thickness") or top_thickness
-    bottom_raw = order["face_material"].get("bottom_raw_thickness") or bottom_thickness
+    top_thickness = 6
+    bottom_thickness = 0
+    top_raw = 6
+    bottom_raw = 0
+    if order.get("face_material"):
+        top_thickness = order["face_material"].get("top_thickness")
+        bottom_thickness = order["face_material"].get("bottom_thickness") or 0
+        top_raw = order["face_material"].get("top_raw_thickness") or top_thickness
+        bottom_raw = order["face_material"].get("bottom_raw_thickness") or bottom_thickness
     frame_thickness = top_thickness + bottom_thickness
     machining_z_offset = bottom_raw - bottom_thickness
 
@@ -272,7 +277,7 @@ def mill_fronts(outdir, order):
     print 'ltemple endpoints', order["ltemple_con"][0][1], order["ltemple_con"][-1][1]
     hinge_loc = order["ltemple_con"][0][1] - (order["ltemple_con"][0][1] - order["ltemple_con"][-1][1])/2
 
-    size_info = order['size_info']
+    size_info = order.get('size_info') or order.get('usersizes')
 
     program = [
         cam.setup(),
@@ -288,7 +293,7 @@ def mill_fronts(outdir, order):
 
         # Note that X and Y parameters in the order are switched from our system
         #TODO: replace the thickness offset with the thickness of the TEMPLE, not the fronts.
-        index_holes([face_c], frame_thickness+machining_z_offset),
+        index_holes(frame_thickness+machining_z_offset),
         lens_holes(left_lens_c, right_lens_c, frame_thickness + machining_z_offset),
         lens_groove(left_lens_c, right_lens_c, groove_depth),
         face_hinge_pockets(order.get("lhinge") or 1, hinge_loc, order["ltemple_x"], (-x_shift, -y_shift), machining_z_offset),
@@ -372,7 +377,9 @@ def mill_temples(outdir, temples, order):
 #TODO: Replace with information in materials database
     print 'Creating milling program for temples'
     top_thickness = 4 # Assume 4mm temple
-    top_raw = order["temple_material"].get("top_raw_thickness") or order["temple_material"].get("top_thickness") or top_thickness
+    top_raw = 4
+    if order.get("temple_material"):
+        top_raw = order["temple_material"].get("top_raw_thickness") or order["temple_material"].get("top_thickness") or top_thickness
 
     print 'top raw', top_raw
 
@@ -386,6 +393,8 @@ def mill_temples(outdir, temples, order):
     l_temple = temples['left_temple_contour']
     r_temple = temples['right_temple_contour']
     offset = frame_offset(l_temple)
+
+# Calculate entry points for bevelling operation
     program = [
         cam.setup(),
         cam.select_fixture("blank_clamp"),
@@ -393,15 +402,103 @@ def mill_temples(outdir, temples, order):
         cam.rapid([0,0]),
         cam.activate_pin("stock_clamp"),
         surface_back(thin_back),
-        index_holes([l_temple, r_temple], top_raw),
+        index_holes(top_raw),
+        #cam.rapid(l_temple[0]),
+        #cam.contour(l_temple, True),
+        #cam.rapid(r_temple[0]),
+        #cam.contour(r_temple, True),
+        rough_temple_bevel(l_temple, thin_back),
+        rough_temple_bevel(r_temple, thin_back),
         cam.change_tool("1/16in endmill"),
         cam.rapid([0,0]),
         temple_hinge_pockets(temples, thin_back),
+        cam.change_tool("dovetail"),
+        bevel_temple(l_temple, thin_back),
+        bevel_temple(r_temple, thin_back),
+        temple_hinge_clearance(l_temple, thin_back),
+        temple_hinge_clearance(r_temple, thin_back),
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
+        cam.change_tool("1/8in endmill"),
         cam.end_program()
     ]
     open(outdir + "/temples_milling.ngc", "w").write(to_string(program))
+
+def extendLine(p1, p2, distance):
+    lineLen = math.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+    return [
+        p1[0] + distance * ((p1[0]-p2[0])/lineLen),
+        p1[1] + distance * ((p1[1]-p2[1])/lineLen)
+        ]
+
+def bevel_temple(temple, thinning):
+    # Assume a 20 degree dovetail cutter, cutting 5mm from bottom
+    dovetail_offset = 9.52/2 - 1.82
+
+    entry = extendLine(temple[-1], temple[-2], 7.5)
+    # Endpoints for the undercut
+    p1 = extendLine(temple[-1], temple[-2], dovetail_offset)
+    p2 = extendLine(temple[0], temple[1], dovetail_offset)
+    p2 = extendLine(p2, p1, 2)
+
+    return [
+        cam.change_tool("dovetail"),
+        cam.feedrate(750),
+        cam.start_spindle(20000),
+        cam.rmp(entry + [-5-thinning]),
+        cam.move(p1),
+        cam.move(p2),
+        cam.move(entry),
+        cam.move(entry + [10]),
+            ]
+
+def temple_hinge_clearance(temple, thinning):
+    # Endpoints for the top bevel
+    entry = extendLine(temple[-1], temple[-2], 7.5)
+    p1 = extendLine(temple[0], temple[-1], 1)
+    p2 = extendLine(temple[-1], temple[0], 1)
+    return [
+       cam.change_tool("engraver"),
+       cam.feedrate(750),
+       cam.start_spindle(20000),
+       cam.rmp(entry + [-2 - thinning]),
+       cam.move(p1),
+       cam.move(p2),
+       cam.move(entry),
+       cam.move(entry + [10]),
+            ]
+
+
+
+
+def rough_temple_bevel(temple,  thinning):
+    p1 = extendLine(temple[-1], temple[-2], 3.175/2 - 0.5)
+    p2 = extendLine(temple[0], temple[1], 3.175/2 - 0.5)
+    p3 = extendLine(temple[0], temple[1], 15)
+    p4 = extendLine(temple[-1], temple[-2], 15) # room for dovetail
+# p1 and p2 are just extensions of the temple - move them to the side a bit to
+# clearance for when the dovetail cutter comes through
+    p1 = extendLine(p1, p2, 3)
+    p2 = extendLine(p2, p1, 3)
+    p3 = extendLine(p3, p4, 3)
+    p4 = extendLine(p4, p3, 3)
+
+
+# Move to the dovetail cutter entry point, helix through stock.
+# Cut a circle big enough to admit the dovetail cutter.
+# Rough cut the end of the temple
+# Clear a return path for the dovetail cutter.
+    return [
+        cam.change_tool("1/8in endmill"),
+        cam.feedrate(1000),
+        cam.rmh(p4 + [-5-thinning], 1, pitch=1),
+        cam.move(p1),
+        cam.move(p2),
+        cam.move(p3),
+        cam.move(p4),
+        cam.rapid(p4 + [10])
+        ]
+
 
 def surface_front(amount):
     if amount < 0.1:
@@ -546,6 +643,29 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
         cam.rapid([None, None, 20.0]),
     ]
     return r
+
+def bevel_temple_ends(path1, path2, thinning):
+    depth = -4 - thinning
+# Assume a 14 degree dovetail cutter, cutting 5mm from bottom
+    dovetail_offset = 12.35/2 - 1.25
+    return [
+            cam.comment("Bevel temple ends"),
+            cam.change_tool("dovetail"),
+            cam.start_spindle(20000),
+            cam.feedrate(750),
+            cam.rapid(path1[0]),
+            cam.rapid([None, None, depth]),
+            cam.move(path1[1]),
+            cam.move(path1[2]),
+            cam.move(path1[0]),
+            cam.rapid([None, None, 10]),
+            cam.rapid(path2[0]),
+            cam.rapid([None, None, depth]),
+            cam.move(path2[1]),
+            cam.move(path2[2]),
+            cam.move(path2[0]),
+            cam.move([None, None, 20])
+            ]
 
 def temple_hinge_pockets(temples, thinned):
     # We're operating in a 90 degree rotated fixture
@@ -702,17 +822,22 @@ def lens_holes(left_c, right_c, thickness):
     ]
     return r
 
-def index_holes(contours, thickness):
-# We put the index holes 1/2 between top and bottom, 160mm apart
-#    log(str(poly.right(face_c)))
-#    log(str(poly.left(face_c)))
-#    log(str(poly.right(face_c) - poly.left(face_c)))
-#    log(str((poly.right(face_c) - poly.left(face_c))/2))
-#    log(str(poly.right(face_c) - (poly.right(face_c) - poly.left(face_c))/2))
+def bevel_entry_hole(temples, thickness):
 
-# EXPERIMENTAL:  Just mill the index holes on the 0 line.  It's the responsibility
-# of the milling programs to make sure the contour is in the correct location
-# with respect to the index holes.
+    hole_radius = 8
+    tool_radius = 3.175/2 # 1/2 inch
+    helix_radius = hole_radius - tool_radius
+    r = [
+        cam.comment("Entry holes for temple bevelling operation"),
+        cam.change_tool("1/8in endmill"),
+        cam.start_spindle(22000),
+        cam.feedrate(800),
+        cam.dwell(5),
+
+    ]
+
+def index_holes(thickness):
+# We put the index holes 1/2 between top and bottom, 160mm apart
     hole_radius = 4.85/2 # Measured from dowel pin
     tool_radius = 3.175/2
     helix_radius = hole_radius - tool_radius
@@ -725,33 +850,6 @@ def index_holes(contours, thickness):
         cam.rmh([0, 90, -thickness - 1.0], helix_radius, 0.5, 1),
         cam.rmh([0, -90, -thickness - 1.0], helix_radius, 0.5, 1),
         ]
-    return r
-# END experimental code
-
-# START pre-experiment code
-    rightmost = -1000000
-    leftmost = 1000000
-    for contour in contours:
-        right = poly.right(contour)
-        left = poly.left(contour)
-        rightmost = max(right, rightmost)
-        leftmost = min(left, leftmost)
-
-#    x_offset = poly.right(face_c) - (poly.right(face_c) - poly.left(face_c))/2
-    x_offset = rightmost - (rightmost - leftmost)/2
-
-    r_hole = [x_offset, 90]
-    l_hole = [x_offset, -90]
-
-    r = [
-        cam.comment("Index Holes for secondary operations"),
-        cam.change_tool("1/8in endmill"),
-        cam.start_spindle(20000),
-        cam.feedrate(1000),
-        cam.dwell(3),
-        cam.rmh(r_hole + [-thickness - 1.0], helix_radius, 0.5, 1),
-        cam.rmh(l_hole + [-thickness - 1.0], helix_radius, 0.5, 1),
-    ]
     return r
 
 
@@ -851,10 +949,12 @@ def arrange_temple_curves(left_temple_contour, hinge):
     # compensate on the x axis
     x_offset = y_offset * math.tan(math.radians(6)) # This adjusts the hinge for the move to the center of the temple
 
-    left_hinge_contour = poly.translate(left_hinge_contour, -x_offset, y_offset)
-    left_holes = poly.translate(left_holes, -x_offset, y_offset)
-    right_hinge_contour = poly.translate(right_hinge_contour, x_offset, y_offset)
-    right_holes = poly.translate(right_holes, x_offset, y_offset)
+    x_offset = x_offset - 1 # Compensate for later bevelling of temple end
+
+    left_hinge_contour = poly.translate(left_hinge_contour, x_offset, y_offset)
+    left_holes = poly.translate(left_holes, x_offset, y_offset)
+    right_hinge_contour = poly.translate(right_hinge_contour, -x_offset, y_offset)
+    right_holes = poly.translate(right_holes, -x_offset, y_offset)
 
     left_temple_contour = poly.rotate_90(left_temple_contour)
     left_hinge_contour = poly.rotate_90(left_hinge_contour)
@@ -862,10 +962,14 @@ def arrange_temple_curves(left_temple_contour, hinge):
     right_temple_contour = poly.rotate(right_temple_contour, 90)
     right_hinge_contour = poly.rotate(right_hinge_contour, 90)
     right_holes = poly.rotate(right_holes, 90)
-
+    # Move them apart as much as possible
+    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)
+    left_temple_contour = poly.translate(left_temple_contour, height, 0)
+    left_holes = poly.translate(left_holes, height, 0)
+    left_hinge_contour = poly.translate(left_hinge_contour, height, 0)
 # Get the thing as horizontal as possible
     # When top-bottom distance is minimized, it's horizontal
-    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)
+#    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)
 #    opt_angle = 0
 #
 #    for angle in range(2, 41):
@@ -897,6 +1001,8 @@ def arrange_temple_curves(left_temple_contour, hinge):
     right_temple_contour = poly.translate(right_temple_contour, 0, -optimization_offset)
     right_hinge_contour = poly.translate(right_hinge_contour, 0, -optimization_offset)
     right_holes = poly.translate(right_holes, 0, -optimization_offset)
+
+
 
     # Make sure they're not intersecting
     translation_step = 2.5
