@@ -31,6 +31,15 @@ def main():
     infile = open(options.infile) if options.infile else urllib.urlopen(options.url)
     o = json.loads(infile.read())
 
+#    if o["usersizes"]:
+#        # This is a legacy order - we need to scale the temples because
+#        # it hasn't been done already.
+#        templescale = float(o["usersizes"]["temple_length"]) / 100.0
+#        temp = o["ltemple_con"]
+#        hinge = o["lhinge"]
+#        for i in range(1, len(temp)-2):
+#            temp[i][0] = temp[i][0] * templescale;
+
     order_id = o.get("order_id") or "testorder"
     outname = datetime.date.today().isoformat() + "/" + order_id
 #    if options.outname == None:
@@ -85,7 +94,7 @@ def main():
     leadout_vector = [(4*last_vector[0])/unit,(4*last_vector[1])/unit]
     leadout_end = [laser_face[-1][0] + leadout_vector[0], laser_face[-1][1] + leadout_vector[1]]
 
-    laser_face.insert(0, leadin_start)
+#    laser_face.insert(0, leadin_start)
     create_dxf(order_dir + "/face_contour.dxf", [laser_face], close=False)
 
 #    temple_dxf(o, order_dir + "/left_temple.dxf", 1, False)
@@ -102,7 +111,7 @@ def main():
 #
     create_dxf(order_dir + "/temple_contour.dxf",
             [poly.rotate_90(temples['left_temple_contour']),
-             poly.rotate_90(temples['right_temple_contour']),
+             poly.rotate_90(temples['right_temple_contour'])[::-1],
 #             left_hinge,
 #             right_hinge,
             ],
@@ -205,7 +214,6 @@ def mill_fronts(outdir, order):
     so includes creating registration holes for subsequent operations."""
 
 # Initial thickness of the forward-facing lamination.  0 if no lamination.
-    print 'Creating milling program for frame fronts'
     top_thickness = 6
     bottom_thickness = 0
     top_raw = 6
@@ -218,8 +226,6 @@ def mill_fronts(outdir, order):
     frame_thickness = top_thickness + bottom_thickness
     machining_z_offset = bottom_raw - bottom_thickness
 
-    print 'top raw', top_raw
-    print 'bottom raw', bottom_raw
 #    top_thickness = 6
 #    bottom_thickness = 0
 #    total_thickness = 6
@@ -236,7 +242,6 @@ def mill_fronts(outdir, order):
     if top_raw > top_thickness:
         thin_front = top_raw - top_thickness
 
-    print 'Calculated surfacing: thinning back by', thin_back, ', thinning front by', thin_front, ', total frame thickess is', frame_thickness
 
 # The machine has the stock clamp oriented 90 degrees to the way the
 # software creates the contours.
@@ -245,39 +250,46 @@ def mill_fronts(outdir, order):
     right_lens_c = poly.mirror_y(left_lens_c, True)
     face_c = face_c + poly.reverse(poly.mirror_y(face_c, False))[1:]
 
-    print 'Got order contours and rotated them for the router'
     temple_height = abs(order["ltemple_con"][0][1] - order["ltemple_con"][-1][1])
-    print 'Calculated temple height:', temple_height
 
     msg = check_frame_size(left_lens_c)
-    print 'Checked frame size'
     if msg:
         print msg
         sys.exit(1)
-    print 'Frame size OK'
 #   Instead of offset, we'll make sure this thing is centered on the stock
     offset = frame_offset(face_c)
     top = poly.top(face_c)
     bottom = poly.bottom(face_c)
     left = poly.left(face_c)
     right = poly.right(face_c)
+
+    print 'frame bounding box: ', top, bottom, left, right
     y_shift = (top + bottom)/2
     x_shift = (left + right)/2
 
+    print 'x and y shift', x_shift, y_shift
     face_c = poly.translate(face_c, -x_shift, -y_shift)
     left_lens_c = poly.translate(left_lens_c, -x_shift, -y_shift)
     right_lens_c = poly.translate(right_lens_c, -x_shift, -y_shift)
-    print 'Moved all contours into place'
 
 # Groove for lenses is 2/3 of the distance from back to front.
 # Here we're calculating the actual cutting depth so we need to add
 # back the material that we surfaced away from the back.
     groove_depth = -(float(machining_z_offset) + (2.0/3)*float(frame_thickness))
-    print 'groove depth is', groove_depth
-    print 'ltemple endpoints', order["ltemple_con"][0][1], order["ltemple_con"][-1][1]
     hinge_loc = order["ltemple_con"][0][1] - (order["ltemple_con"][0][1] - order["ltemple_con"][-1][1])/2
 
-    size_info = order.get('size_info') or order.get('usersizes')
+    size_info = order.get('size_info')
+    if not size_info and order.get('usersizes'):
+        # Legacy order
+        size_info =  order.get('usersizes')
+        size_info["noseradius"] = size_info["nose_radius"]
+        size_info["noseheight"] = size_info["nose_height"]
+        size_info["splayangle"] = size_info["nose_splayangle"]
+        size_info["ridgeangle"] = size_info["nose_ridgeangle"]
+
+    generic = not size_info or len(size_info) == 0
+
+    generic = True # TESTING
 
     program = [
         cam.setup(),
@@ -305,6 +317,13 @@ def mill_fronts(outdir, order):
             float(size_info["splayangle"]),
             float(size_info["ridgeangle"]),
             face_c, frame_thickness, machining_z_offset, -x_shift ),
+
+#        nose_contour(
+#            7.0, 8.0, 30.0, 32.0, face_c, frame_thickness, machining_z_offset, -x_shift),
+
+        #generic_nose_contour(face_c, frame_thickness, machining_z_offset, -x_shift),
+
+
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
         cam.change_tool("1/8in endmill"),
@@ -314,6 +333,42 @@ def mill_fronts(outdir, order):
     ]
     print 'Writing face milling program to ', outdir + "/face_stange1.ngc"
     open(outdir + "/face_stage1.ngc", "w").write(to_string(program))
+
+def generic_nose_contour(face_con, thickness, thin_back, centering_shift):
+    """ Use the tapered endmill to create a nose relief along the curve of the
+    glasses frame.
+    First construct a path that is a simple, average shape for a nose: 8 mm nose radius, 34 degree
+    splay.  Compare the curve to the spline of the glasses, if the spline crosses our naive curve, follow
+    the glasses curve until it crosses the naive curve again, then keep following the naive curve.
+    """
+    curve_offset = 0 # Set so tapered endmill cuts about 1mm from front face of frame
+    nose_sa = math.radians(34) # Experiment with this
+    nose_rad = 9
+    xfloor = -26 # set to avoid hitting clamp
+    nose_height = 8 # again, experiment
+    naive_poly = nose.nose_poly(nose_rad, nose_height, nose_sa, nose_sa, xfloor, curve_offset, 0)
+    # close it
+    #naive_poly = naive_poly + [naive_poly[0]]
+
+
+    intersect = poly.difference(naive_poly, face_con)
+    intersect = intersect[1:] + [intersect[0]]
+    eroded = poly.erode(2, intersect)[0]
+    finish = poly.erode(1.5, intersect)[0]
+
+    hole_radius = 4.85/2 # Measured from dowel pin
+    tool_radius = 3.175/2
+    helix_radius = hole_radius - tool_radius
+
+
+    return [
+        cam.change_tool("tapered"),
+        cam.start_spindle(20000),
+        cam.feedrate(1000),
+        cam.rmh(eroded[0] + [-thickness - 1.0], helix_radius, 0.5, 1),
+        cam.contour(eroded, False),
+        cam.contour(finish[::-1], False),
+        ]
 
 def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_back, centering_shift):
     """Creates the nose contour feature toolpath.  Angular arguments are in degrees."""#
@@ -343,12 +398,14 @@ def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_b
     sa = math.radians(nose_sa)
     ra = math.radians(nose_ra)
     h = nose_h + centering_shift
-
+    h = nose_h
+    print 'Height is ', h
     xfloor = poly.left(face_con) - 3.175  # bottom most point minus tool radius
     xfloor = max(xfloor, -27.0) # miminum safe distance without hitting clamp
 
     z_depth = 0 # Start a bit above the surface of the glasses
     nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, cutter_offset, z_depth)
+    print 'Called nextpoly', nr, h, sa, ra, xfloor, cutter_offset, z_depth
 
     r = [
         "(Nose Contour)",
@@ -403,10 +460,14 @@ def mill_temples(outdir, temples, order):
         cam.activate_pin("stock_clamp"),
         surface_back(thin_back),
         index_holes(top_raw),
-        #cam.rapid(l_temple[0]),
-        #cam.contour(l_temple, True),
-        #cam.rapid(r_temple[0]),
-        #cam.contour(r_temple, True),
+
+
+#        cam.rapid(l_temple[0]+[0]),
+#        cam.contour(l_temple, True),
+#        cam.move(l_temple[0]),
+#        cam.rapid(r_temple[0]),
+#        cam.contour(r_temple, True),
+
         rough_temple_bevel(l_temple, thin_back),
         rough_temple_bevel(r_temple, thin_back),
         cam.change_tool("1/16in endmill"),
@@ -744,8 +805,8 @@ def lens_groove(left_c, right_c, height):
     if not poly.is_ccw(right_c):
         right_c = poly.reverse(right_c)
 
-    lgroove = poly.erode(0.85, left_c)[0]
-    rgroove = poly.erode(0.85, right_c)[0]
+    lgroove = poly.erode(1.8, left_c)[0]
+    rgroove = poly.erode(1.8, right_c)[0]
 
     left_entry = poly.erode(7.0, left_c)[0][0];
     right_entry = poly.erode(7.0, right_c)[0][0];
@@ -847,8 +908,10 @@ def index_holes(thickness):
         cam.start_spindle(22000),
         cam.feedrate(1000),
         cam.dwell(5),
-        cam.rmh([0, 90, -thickness - 1.0], helix_radius, 0.5, 1),
-        cam.rmh([0, -90, -thickness - 1.0], helix_radius, 0.5, 1),
+        # Index holes should be at 90, -90 but are shifted a bit to compensate
+        # for inaccuracy on laser fixture
+        cam.rmh([0, 85.00, -thickness - 1.0], helix_radius, 0.5, 1),
+        cam.rmh([0, -85.00, -thickness - 1.0], helix_radius, 0.5, 1),
         ]
     return r
 
@@ -927,6 +990,9 @@ def temple_dxf(o, filename, hinge, reverse):
 
 
 def arrange_temple_curves(left_temple_contour, hinge):
+    # Normalize temple to get origin at 0,0
+    left_temple_contour = poly.translate(left_temple_contour, -left_temple_contour[0][0], -left_temple_contour[0][1])
+
     right_temple_contour = poly.mirror_x(left_temple_contour, False)
 
     left_hinge = hinges.get_hinge(hinge)
@@ -937,7 +1003,6 @@ def arrange_temple_curves(left_temple_contour, hinge):
     right_holes = right_hinge['temple_holes'] # opposite direction.  FIX someday
     right_hinge_contour = right_hinge['temple_contour']
     left_hinge_contour = left_hinge['temple_contour']
-    print 'right hinge endpoints', right_hinge_contour[0], right_hinge_contour[-1], right_hinge_contour[-2]
 
     # y offset is mucked up because it's calculated from the center of the hinge boxing
     # square, not the center of the straight edge
@@ -945,11 +1010,10 @@ def arrange_temple_curves(left_temple_contour, hinge):
     lowpoint = poly.bottom(left_hinge_contour);
     y_offset = hinge_y-(lowpoint + (highpoint-lowpoint)/2.0) # Distance to move hinge to center it on temple
 
-    # Since we're tilted 6 degrees compared to design space we need to
-    # compensate on the x axis
-    x_offset = y_offset * math.tan(math.radians(6)) # This adjusts the hinge for the move to the center of the temple
-
-    x_offset = x_offset - 1 # Compensate for later bevelling of temple end
+    # strategy for hinge placement.  Align corner of
+    print left_temple_contour[0][0], left_temple_contour[-1][0]
+    temple_x = left_temple_contour[0][0] - (left_temple_contour[0][0] - left_temple_contour[-1][0]) / 2
+    x_offset =   temple_x - left_hinge_contour[0][0] - 2.5
 
     left_hinge_contour = poly.translate(left_hinge_contour, x_offset, y_offset)
     left_holes = poly.translate(left_holes, x_offset, y_offset)
@@ -962,38 +1026,22 @@ def arrange_temple_curves(left_temple_contour, hinge):
     right_temple_contour = poly.rotate(right_temple_contour, 90)
     right_hinge_contour = poly.rotate(right_hinge_contour, 90)
     right_holes = poly.rotate(right_holes, 90)
-    # Move them apart as much as possible
-    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)
+
+    # Move them apart so they're not touching
+    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)+1
     left_temple_contour = poly.translate(left_temple_contour, height, 0)
     left_holes = poly.translate(left_holes, height, 0)
     left_hinge_contour = poly.translate(left_hinge_contour, height, 0)
-# Get the thing as horizontal as possible
-    # When top-bottom distance is minimized, it's horizontal
-#    height = poly.right(left_temple_contour) - poly.left(left_temple_contour)
-#    opt_angle = 0
-#
-#    for angle in range(2, 41):
-#        candidate_contour = poly.rotate(left_temple_contour, -angle)
-#        candidate_height = poly.right(candidate_contour)-poly.left(candidate_contour)
-#        if candidate_height < height:
-#            height = candidate_height
-#            opt_angle = angle
-#        else:
-#            break
-##    print 'rotating temples by {0} degrees'.format(opt_angle)
-#    left_temple_contour = poly.rotate(left_temple_contour, -opt_angle);
-#    left_holes = poly.rotate(left_holes, -opt_angle)
-#    left_hinge_contour = poly.rotate(left_hinge_contour, -opt_angle)
+    right_temple_contour = poly.translate(right_temple_contour, -height, 0)
+    right_holes = poly.translate(right_holes, -height, 0)
+    right_hinge_contour = poly.translate(right_hinge_contour, -height, 0)
 
-#    right_temple_contour = poly.rotate(right_temple_contour, opt_angle);
-#    right_holes = poly.rotate(right_holes, opt_angle)
-#    right_hinge_contour = poly.rotate(right_hinge_contour, opt_angle)
 
-    temple_width = poly.top(left_temple_contour) - poly.bottom(left_temple_contour)
-#    print 'temple width is {0}'.format(temple_width)
-#
+
 #    # Move left one left, right one right to offset them
-    optimization_offset = (150-temple_width)/2.0
+    temple_width = poly.top(left_temple_contour) - poly.bottom(left_temple_contour)
+    optimization_offset = (180-temple_width)/2.0
+    print 'optimization offset', optimization_offset, temple_width
     left_temple_contour = poly.translate(left_temple_contour, 0, optimization_offset)
     left_holes = poly.translate(left_holes, 0, optimization_offset)
     left_hinge_contour = poly.translate(left_hinge_contour, 0, optimization_offset)
@@ -1005,19 +1053,20 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 
     # Make sure they're not intersecting
-    translation_step = 2.5
-    intersection = poly.intersection(left_temple_contour, right_temple_contour)
-    while(len(intersection) > 0):
-        left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
-        left_holes = poly.translate(left_holes, translation_step, 0)
-        left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
-        right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
-        right_holes = poly.translate(right_holes, -translation_step, 0)
-        right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
-        intersection = poly.intersection(left_temple_contour, right_temple_contour)
+#    translation_step = 2.5
+#    intersection = poly.intersection(left_temple_contour, right_temple_contour)
+#    while(len(intersection) > 0):
+#        left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
+#        left_holes = poly.translate(left_holes, translation_step, 0)
+#        left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
+#        right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
+#        right_holes = poly.translate(right_holes, -translation_step, 0)
+#        right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
+#        intersection = poly.intersection(left_temple_contour, right_temple_contour)
     # Move them together until they touch (may will not have moved at all above because they are far)
     # then back off.
     translation_step = 1.0
+    intersection = []
     while(len(intersection) == 0):
         print "still intersecting", len(intersection)
         left_temple_contour = poly.translate(left_temple_contour, -translation_step, 0)
@@ -1027,8 +1076,8 @@ def arrange_temple_curves(left_temple_contour, hinge):
         right_holes = poly.translate(right_holes, translation_step, 0)
         right_hinge_contour = poly.translate(right_hinge_contour, translation_step, 0)
         intersection = poly.intersection(left_temple_contour, right_temple_contour)
-
-    # We're just overlapping, so now back off
+#
+#    # We're just overlapping, so now back off
     translation_step = 3
     left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
     left_holes = poly.translate(left_holes, translation_step, 0)
@@ -1040,15 +1089,31 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 #    # sanity check that we fit on stock
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
-    if total_width > 80:
+    if total_width > 70:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
+#
+## Spread them out
+    while total_width < 55:
+        left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
+        left_holes = poly.translate(left_holes, translation_step, 0)
+        left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
+        right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
+        right_holes = poly.translate(right_holes, -translation_step, 0)
+        right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
+        total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
+
+    intersection = poly.intersection(left_temple_contour, right_temple_contour)
+    if len(intersection) > 0:
+        print 'Error!  Temples are too big to fit on stock.', total_width
+        raise 'Sizing Error'
+
+    print 'Total width of temples', total_width
 
     # Now they're packed togegther OK but not centred on the stock
     #Midpoint of curves should be 0, so that's how much we'll shift it
     y_centering_shift = poly.bottom(right_temple_contour) + (poly.top(left_temple_contour) - poly.bottom(right_temple_contour))/2.0
     x_centering_shift = (poly.right(left_temple_contour) + poly.left(right_temple_contour))/2;
-
 
 
     left_temple_contour = poly.translate(left_temple_contour, -x_centering_shift, -y_centering_shift)

@@ -1,24 +1,26 @@
 """Toolpath and gcode generation."""
 TOOL_DEFINITIONS = {
-        "1/16in endmill": 1,
-        "1/8in endmill": 2,
-        "1/4in endmill": 3,
-        "dovetail": 4,
-        "1/4in ballmill": 5,
-        "vgroove" : 6,
-        "1mm drill": 7,
-        "3/4in surfacer": 8,
-        "engraver": 9,
+    "1/16in endmill": 1,
+    "1/8in endmill": 2,
+    "1/4in endmill": 3,
+    "dovetail": 4,
+    "1/4in ballmill": 5,
+    "vgroove" : 6,
+    "1mm drill": 7,
+    "3/4in surfacer": 8,
+    "engraver": 9,
+    "empty10": 10,
+    "tapered": 11, 
 };
 
 FIXTURE_DEFINITIONS = {
-        "default": "G54",
-        "blank_clamp": "G55",
-        "lens_clamp" : "G56"
-        };
+    "default": "G54",
+    "blank_clamp": "G55",
+    "lens_clamp" : "G56"
+};
 PIN_DEFINITIONS = {
-        "stock_clamp": "P03",
-    };
+    "stock_clamp": "P03",
+};
 
 def xyz(point):
     # Format is (x, y) or (x, y, z).  (x, y) implies z is None

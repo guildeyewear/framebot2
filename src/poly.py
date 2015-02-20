@@ -16,17 +16,42 @@ extract the final required features (e.g. gather length-along-line points, then 
 gaps at these lengths).
 
 It will also enable some interesting functionality, like tab-every-inch-of-polyline segments.
-"""
 
+"""
 def intersection(poly1, poly2):
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
+    scale_factor = 1000.0
+    scaled1 = scale(poly1, scale_factor);
+    scaled2 = scale(poly2, scale_factor);
     c = pyclipper.Pyclipper()
-    c.add_polygon(poly1)
-    c.sub_polygon(poly2)
+    c.add_polygon(scaled1)
+    c.sub_polygon(scaled2)
     result = c.execute(0)
     sys.stdout = old_stdout
-    return result
+    if result and len(result) > 0:
+        return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]]
+    else:
+        return result
+    #return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]];
+
+def difference(poly1, poly2):
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+    scale_factor = 1000.0
+    scaled1 = scale(poly1, scale_factor);
+    scaled2 = scale(poly2, scale_factor);
+    c = pyclipper.Pyclipper()
+    c.add_polygon(scaled1)
+    c.sub_polygon(scaled2)
+    result = c.execute(2)
+    sys.stdout = old_stdout
+    if result and len(result) > 0:
+        return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]]
+    else:
+        return result
+    #return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]];
+
 
 def line_length(line):
     """Returns length of a line segment [[x0, y0], [x1, y1]]"""
