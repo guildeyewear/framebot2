@@ -7,10 +7,10 @@ TOOL_DEFINITIONS = {
     "1/4in ballmill": 5,
     "vgroove" : 6,
     "1mm drill": 7,
-    "3/4in surfacer": 8,
+    "3/8in endmill": 8,
     "engraver": 9,
     "empty10": 10,
-    "tapered": 11, 
+    "tapered": 11,
 };
 
 FIXTURE_DEFINITIONS = {
@@ -121,7 +121,7 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
         direction = -1
     start_x = start_x + tool_radius
     end_x = end_x - tool_radius
-    x_stepover = tool_radius * 1.35   # Sign of tool_radius depends on start_x compare just before
+    x_stepover = tool_radius * 1.5   # Sign of tool_radius depends on start_x compare just before
 
     start = [start_x, start_y]
     current_loc = [start[0], start[1]]
@@ -144,12 +144,12 @@ def surface_along_y(start_x, start_y, end_x, end_y, tool_radius, depth):
 
     # Final stepover to finish
     current_loc[0] = end_x
-    path = path + [[current_loc[0], current_loc[1]]]
+#    path = path + [[current_loc[0], current_loc[1]]]
     if current_loc[1] == start_y:
         current_loc[1] = end_y
     else:
         current_loc[1] = start_y
-    path = path + [[current_loc[0], current_loc[1]]]
+#    path = path + [[current_loc[0], current_loc[1]]]
     return [
         rmp(start + [depth], retract=50),
         contour(path, False),

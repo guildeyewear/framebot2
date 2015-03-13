@@ -308,6 +308,15 @@ def mill_fronts(outdir, order):
         index_holes(frame_thickness+machining_z_offset),
         lens_holes(left_lens_c, right_lens_c, frame_thickness + machining_z_offset),
         lens_groove(left_lens_c, right_lens_c, groove_depth),
+
+#        rough_nose_contour(
+#            float(size_info["noseradius"]),
+#            float(size_info["noseheight"]),
+#            float(size_info["splayangle"]),
+#            float(size_info["ridgeangle"]),
+#            face_c, frame_thickness, machining_z_offset, -x_shift ),
+
+
         face_hinge_pockets(order.get("lhinge") or 1, hinge_loc, order["ltemple_x"], (-x_shift, -y_shift), machining_z_offset),
 
         #nose_pads(order, thickness),
@@ -327,8 +336,8 @@ def mill_fronts(outdir, order):
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
         cam.change_tool("1/8in endmill"),
-        #cam.rapid([face_c[0][0], face_c[0][1], -thin_back] ),
-        #cam.contour(face_c, True),
+    #    cam.rapid([face_c[0][0], face_c[0][1], -thin_back] ),
+    #    cam.contour(face_c, True),
         cam.end_program(),
     ]
     print 'Writing face milling program to ', outdir + "/face_stange1.ngc"
@@ -370,22 +379,31 @@ def generic_nose_contour(face_con, thickness, thin_back, centering_shift):
         cam.contour(finish[::-1], False),
         ]
 
+def rough_nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_back, centering_shift):
+    sa = math.radians(nose_sa)
+    ra = math.radians(nose_ra)
+    h = nose_h + centering_shift
+    h = nose_h
+    xfloor = poly.left(face_con) - 3.175  # bottom most point minus tool radius
+    xfloor = max(xfloor, -27.0) # miminum safe distance without hitting clamp
+    cutter_offset = 1.5875 # radius of 1/8" cutter
+
+    nosepoly = nose.nose_poly(nose_rad, h, sa, ra, xfloor, cutter_offset, thickness+thin_back)
+
+    return [
+        "(Rough nose contour)",
+        cam.change_tool("1/8in endmill"),
+        cam.start_spindle(20000),
+        cam.feedrate(2000),
+        cam.rmp(nosepoly[0] + [1.0]),
+        cam.rmh([0, 85.00, -thickness - 1.0], helix_radius, 0.5, 1),
+            ]
+
 def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_back, centering_shift):
     """Creates the nose contour feature toolpath.  Angular arguments are in degrees."""#
     print 'Generating nose contour'
     nr = nose_rad
     nose_tool_radius = 3.175
-
-    # Set the nose height to the bottom of the bridge, but no
-    # higher than 10mm.
-    #h = min(face_con[len(face_con)/2][0], 10)
-
-    # Now the nose height will be set to the measured height, but
-    # no less than 10, or the bridge if that's less than 10
-    #h = max(h, nose_h)
-
-    #bridge_top = face_con[0][0]
-
 
     # We're cutting with a ball-end mill.  Where it actually cuts is dependent on the
     # ridge angle.  If you draw a line at the ridge angle and put it tangent to the ball mill,
@@ -393,19 +411,18 @@ def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_b
     # of the cutting line and the surface is 1/2 of the ridge angle.  From that and the radius
     # of the ball mill we can figure out the offset.
     cutter_offset = (nose_tool_radius)*math.tan(math.radians(nose_ra/2))
-    print "Cutter offset", cutter_offset
 
     sa = math.radians(nose_sa)
     ra = math.radians(nose_ra)
     h = nose_h + centering_shift
-    h = nose_h
-    print 'Height is ', h
+    print 'centering shift', centering_shift
+#    h = nose_h
+
     xfloor = poly.left(face_con) - 3.175  # bottom most point minus tool radius
     xfloor = max(xfloor, -27.0) # miminum safe distance without hitting clamp
 
-    z_depth = 0 # Start a bit above the surface of the glasses
+    z_depth = -thin_back # Start a bit above the surface of the glasses
     nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, cutter_offset, z_depth)
-    print 'Called nextpoly', nr, h, sa, ra, xfloor, cutter_offset, z_depth
 
     r = [
         "(Nose Contour)",
@@ -576,12 +593,12 @@ def surface_front(amount):
     program =  [
         cam.comment("Surface front by %f mm" % amount),
         cam.flip_stock(),
-        cam.change_tool("3/4in surfacer"),
-        cam.spindle_speed(15000),
-        cam.feedrate(1500),
+        cam.change_tool("3/8in endmill"),
+        cam.spindle_speed(20000),
+        cam.feedrate(2000),
         cam.start_spindle(),]
     for height in surface_heights:
-        program = program + cam.surface_along_y(-40, -110, 40, 110, 9.525, -height)
+        program = program + cam.surface_along_y(-40, -110, 40, 110, 4.7625, -height)
     program = program + [
         cam.stop_spindle(),
         cam.retract_spindle(),
@@ -605,24 +622,24 @@ def surface_back(amount):
 
     return [
         cam.comment("Surface back by %f mm" % amount),
-        cam.change_tool("3/4in surfacer"),
+        cam.change_tool("3/8in endmill"),
         cam.spindle_speed(15000),
         cam.feedrate(1500),
         cam.start_spindle(),
         cam.dwell(5),
-        cam.surface_along_y(-40, -110, 40, 110, 9.525, -amount),
+        cam.surface_along_y(-40, -110, 40, 110, 4.7625, -amount),
         cam.rapid([None, None, 20]),
         ] if amount > 0 else None
     program =  [
         cam.comment("Surface back by %f mm" % amount),
-        cam.change_tool("3/4in surfacer"),
-        cam.spindle_speed(15000),
-        cam.feedrate(1500),
+        cam.change_tool("3/8in endmill"),
+        cam.spindle_speed(20000),
+        cam.feedrate(2000),
         cam.start_spindle(),
         cam.dwell(5),
         ]
     for height in surface_heights:
-        program = program + cam.surface_along_y(-40, -110, 40, 110, 9.525, -height),
+        program = program + cam.surface_along_y(-40, -110, 40, 110, 4.7625, -height),
     program = program + [
         cam.stop_spindle(),
         cam.retract_spindle(),
@@ -634,7 +651,7 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
 
     print 'Generating face hinge pockets', hinge_num
     xposition = hinge_height;
-    yposition = temple_position+3.5; # 4mm for the temple, but less 0.5mm for temple hinge pocket
+    yposition = temple_position+3.0; # 4mm for the temple, but less 1mm for temple hinge pocket
     print 'Position is ', xposition, yposition
     left_hinge = hinges.get_hinge(hinge_num)
     print 'Got left hinge'
@@ -843,9 +860,7 @@ def lens_holes(left_c, right_c, thickness):
 
 
     lhole = poly.erode(tool_radius/2.0, left_c)[0]
-    print 'left hole eroded', lhole[0], lhole[-1]
     rhole = poly.erode(tool_radius/2.001, right_c);
-    print 'right hole eroded', lhole[0], lhole[-1]
     rhole = rhole[0]
 #    polyline = dxf.polyline(layer="OUTLINE")
 #    polyline.add_vertices(lhole)
@@ -854,14 +869,12 @@ def lens_holes(left_c, right_c, thickness):
 
     right_rough = poly.erode((tool_radius + 0.3)/2, right_c)[0]
     left_rough = poly.erode((tool_radius+0.3)/2, left_c)[0]
-    print 'Calculated roughing passes'
     #lgroove = poly.erode(0.8, left_c)[0]
     #rgroove = poly.erode(0.8, right_c)[0]
 
     left_entry = poly.erode(5.0, left_c)[0][0];
     right_entry = poly.erode(5.0, right_c)[0][0];
 
-    print 'calculated entry points'
     lhole = poly.reverse(lhole)
     rhole = poly.reverse(rhole)
 
@@ -1040,7 +1053,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 #    # Move left one left, right one right to offset them
     temple_width = poly.top(left_temple_contour) - poly.bottom(left_temple_contour)
-    optimization_offset = (180-temple_width)/2.0
+    optimization_offset = (160-temple_width)/2.0
     print 'optimization offset', optimization_offset, temple_width
     left_temple_contour = poly.translate(left_temple_contour, 0, optimization_offset)
     left_holes = poly.translate(left_holes, 0, optimization_offset)
@@ -1078,7 +1091,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
         intersection = poly.intersection(left_temple_contour, right_temple_contour)
 #
 #    # We're just overlapping, so now back off
-    translation_step = 3
+    translation_step = 2
     left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
     left_holes = poly.translate(left_holes, translation_step, 0)
     left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
@@ -1089,7 +1102,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 #    # sanity check that we fit on stock
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
-    if total_width > 70:
+    if total_width > 55:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
 #
