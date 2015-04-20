@@ -41,7 +41,7 @@ def main():
 #            temp[i][0] = temp[i][0] * templescale;
 
     order_id = o.get("order_id") or "testorder"
-    outname = datetime.date.today().isoformat() + "/" + order_id
+    # outname = datetime.date.today().isoformat() + "/" + order_id
 #    if options.outname == None:
 #        print "extracting out name from ", options.infile
 #        outname = options.infile.split("/")[-1]
@@ -53,7 +53,7 @@ def main():
     # Create the output director
     #order_dir = "/Users/rodfrey/Dropbox/guild_orders/" + outname
     #order_dir = "/Volumes/Untitled/" + outname
-    order_dir = "/Users/rodfrey/Development/framebot2/" + outname
+    # order_dir = "/Users/ana0/Development/framebot2/" + outname
     order_dir = options.outname
     if not os.path.exists(order_dir):
         os.makedirs(order_dir)
@@ -1078,7 +1078,9 @@ def arrange_temple_curves(left_temple_contour, hinge):
 #        intersection = poly.intersection(left_temple_contour, right_temple_contour)
     # Move them together until they touch (may will not have moved at all above because they are far)
     # then back off.
-    translation_step = 1.0
+    #smaller translation step (was 1.0)
+    translation_step = 0.1
+
     intersection = []
     while(len(intersection) == 0):
         print "still intersecting", len(intersection)
@@ -1090,24 +1092,29 @@ def arrange_temple_curves(left_temple_contour, hinge):
         right_hinge_contour = poly.translate(right_hinge_contour, translation_step, 0)
         intersection = poly.intersection(left_temple_contour, right_temple_contour)
 #
-#    # We're just overlapping, so now back off
-    translation_step = 2
-    left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
-    left_holes = poly.translate(left_holes, translation_step, 0)
-    left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
-    right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
-    right_holes = poly.translate(right_holes, -translation_step, 0)
-    right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
+    # Sarah commented the code below out as it seems to be speading the temples out farther than necessary
+    # And I don't think we need it?
+
+    # We're just overlapping, so now back off
+    # translation_step = 0.5
+    # left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
+    # left_holes = poly.translate(left_holes, translation_step, 0)
+    # left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
+    # right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
+    # right_holes = poly.translate(right_holes, -translation_step, 0)
+    # right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
 
 
 #    # sanity check that we fit on stock
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
+    print "before spreading, total width is:", total_width
     if total_width > 55:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
 #
 ## Spread them out
     while total_width < 55:
+        print "spreading out temples"
         left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
         left_holes = poly.translate(left_holes, translation_step, 0)
         left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)

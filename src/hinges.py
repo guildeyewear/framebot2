@@ -23,7 +23,7 @@ def get_hinge(pn, left=True):
     'temple_holes': make_points(temple_holes),
     """
     print 'getting hinge', pn
-    h = json.load(open("/Users/rodfrey/Development/framebot2/hinges/%d.json" % pn))
+    h = json.load(open("/Users/ana0/Development/framebot2/hinges/%d.json" % pn))
     print 'loaded the hinge'
     # hinges are modelled with y in reverse orientation from the mill
 #    to_rotate = ['face_holes', 'face_contour']
