@@ -164,13 +164,18 @@ def scale(polygon, scale):
     return [[round(p[0]*scale), round(p[1]*scale)] for p in polygon]
 
 def dilate(r, polygon):
-    old_stdout = sys.stdout
-    sys.stdout = mystdout = StringIO()
-    scale_factor = 1000.0
+    #old_stdout = sys.stdout
+    #sys.stdout = mystdout = StringIO()
+    scale_factor = 100.0
+
+
     scaled = scale(polygon, scale_factor);
+
+    if(not is_ccw(scaled)):
+        scaled = reverse(scaled)
     offset = pyclipper.offset([scaled], r*scale_factor, jointype=2);
 
-    sys.stdout = old_stdout
+    #sys.stdout = old_stdout
     return [[p[0]/scale_factor, p[1]/scale_factor] for p in offset[0]];
     """Return the provided polygon, dilated by r."""
     # return m2d.run(circle(r), polygon, mode="dilate")
@@ -226,10 +231,13 @@ def arc(r, starta, enda, n=32):
 
 def shorter_segment(line, length):
     """Returns a segment of a segment that is 'length' long."""
-    ratio = length / line_length(line)
+    ratio = abs(length / line_length(line))
 
-    dx = line[0][0] - line[1][0]
-    dy = line[0][1] - line[1][1]
+    #dx = line[0][0] - line[1][0]
+    #dy = line[0][1] - line[1][1]
+
+    dx = line[1][0] - line[0][0]
+    dy = line[1][1] - line[0][1]
 
     r = [line[0][0] + (ratio * dx), line[0][1] + (ratio * dy)]
 
@@ -238,6 +246,11 @@ def shorter_segment(line, length):
 def point_at_length(polyline, length, closed):
     """Returns the coordinates of a point at length distance along the polyline."""
 
+    # degenerate case: requested length 0
+    if length == 0:
+        return polyline[0]
+
+
     if length > polyline_length(polyline, closed):
         raise Exception("Requested length %f is longer than the polyline's length of %f" % (length, polyline_length(polyline, closed)))
 
@@ -245,7 +258,6 @@ def point_at_length(polyline, length, closed):
 
     for p in pairs(polyline, closed):
         l += line_length(p)
-
         if l == length:
             return p[1]
         elif l > length:
@@ -274,12 +286,105 @@ def segment(polyline, start, end, closed):
     for p in pairs(polyline, closed):
         l += line_length(p)
 
+        # If one of the endpoints is the same as start_p or end_p, it's automatically
+# disqualified from being in the middle
+        disqualified = False
+        for pt in p:
+            if points_are_equal(pt, start_p) or points_are_equal(pt, end_p):
+                disqualified = True
+        if disqualified:
+            continue
+
         if l > start and l < end:
             middle += [p[0]]
-
+        elif l > end:
+            break
     return [start_p] + middle + [end_p]
 
-def make_gaps(polyline, lengths, gap, top, bottom, closed):
+# Make sure the polygon has a point at length 'length'.  Simplifies
+# degenerate cases when modifying polygons later to add tabs
+def insert_point_at_length(polyline, length, closed):
+    r = [polyline[0]]
+    inserted = False
+    l = 0.0
+    for p in pairs(polyline, closed):
+        l += line_length(p)
+        if l < length:
+            r += [p[1]]
+        elif not inserted:
+            r += [point_at_length(polyline, length, closed)]
+            r += [p[1]]
+            inserted = True
+        else:
+            r += [p[1]]
+    return r
+
+def points_are_equal(p1, p2):
+    if abs(p1[0] - p2[0]) < 0.001 and abs(p1[1] - p2[1]) < 0.001:
+        return True
+    return False
+
+def make_ramped_tabs(polyline, lengths, tab_width, bottom, top, closed):
+    r = []
+    start = 0.0
+
+    # Insert points at the relevant transition points.
+    for l in sorted(lengths):
+        tab_start = l - tab_width/2.0
+        tab_end = l + tab_width/2.0
+        polyline = insert_point_at_length(polyline, tab_start, closed)
+        polyline = insert_point_at_length(polyline, l, closed)
+        polyline = insert_point_at_length(polyline, tab_end, closed)
+
+    for l in sorted(lengths):
+        tab_start = l - tab_width/2.0
+        tab_end = l + tab_width/2.0
+        free = set_z(segment(polyline, start, tab_start, False), bottom)
+        tab_sg1 = segment(polyline, tab_start, l, False)
+        tab_sg2 = segment(polyline, l, tab_end, False)
+        ramp1 = ramp(tab_sg1, bottom, top, False)
+        ramp2 = ramp(tab_sg2, top, bottom, False)
+        r += free
+        r += ramp1
+        r += ramp2
+        start = tab_end
+
+    # Tail end
+    tail = set_z(segment(polyline, start, polyline_length(polyline, closed), closed), bottom)
+    r += tail
+    return r
+
+
+
+def make_square_tabs(polyline, lengths, tab_width, bottom, top, closed):
+    r = []
+    start = 0.0
+
+# Insert points at the relevant transition points.
+    for l in sorted(lengths):
+        tab_start = l - tab_width/2.0
+        tab_end = l + tab_width/2.0
+        polyline = insert_point_at_length(polyline, tab_start, closed)
+        polyline = insert_point_at_length(polyline, tab_end, closed)
+
+    for l in sorted(lengths):
+        tab_start = l - tab_width/2.0
+        tab_end = l + tab_width/2.0
+        free = set_z(segment(polyline, start, tab_start, False), bottom)
+        tab_sg = segment(polyline, tab_start, tab_end, False)
+        tab = set_z(tab_sg, top)
+        r += free
+        r += tab
+
+        start = tab_end
+
+    # Tail end
+    tail = set_z(segment(polyline, start, polyline_length(polyline, closed), closed), bottom)
+    r += tail
+    return r
+
+
+def make_tabs(polyline, lengths, tab_width, bottom, top, closed):
     """
     Adds steps to the 'polyline' at the given 'lengths' with a width of 'gap'.
     Non-gap pieces have a height of 'bottom', gap pieces have a height of 'top'.
@@ -289,29 +394,35 @@ def make_gaps(polyline, lengths, gap, top, bottom, closed):
     start = 0.0
 
     for l in sorted(lengths):
-        tab_start = l - gap/2.0
-        tab_end = l + gap/2.0
+        tab_start = l - tab_width/2.0
+        tab_end = l + tab_width/2.0
 #        ramp_up_end = tab_start + gap/4.0
 #        ramp_down_start = tab_end - gap/4.0
 
         free = set_z(segment(polyline, start, tab_start, False), bottom)
 #        ramp_up = ramp2(segment(polyline, tab_start, ramp_up_end, False), bottom, top)
-#        tab = set_z(segment(polyline, ramp_up_end, ramp_down_start, False), top)
+        tab1 = segment(polyline, tab_start, l, False)
+        tab2 = segment(polyline, l, tab_end, False)
+
+        tab1 = ramp(tab1[1:], bottom, top, False)
+        tab2 = ramp(tab2[1:], top, bottom, False)
+
 #        ramp_down = ramp2(segment(polyline, ramp_down_start, tab_end, False), top, bottom)
 
-        tab = set_z(segment(polyline, tab_start, tab_end, closed), top)
-        ramp_points = len(tab)/4
-        z_interval = (top-bottom) / ramp_points
-        z_levels = [i*z_interval for i in range(ramp_points)]
-        for i, z_level in enumerate(z_levels):
-            tab[i][2] = bottom + z_level
-            tab[-i][2] = bottom + z_level
+#        tab = set_z(segment(polyline, tab_start, tab_end, False), top)
+#        ramp_points = len(tab)/4
+#        z_interval = (top-bottom) / ramp_points
+#        z_levels = [i*z_interval for i in range(ramp_points)]
+#        for i, z_level in enumerate(z_levels):
+#            tab[i][2] = bottom + z_level
+#            tab[-i][2] = bottom + z_level
 
 #        ramp2(segment(polyline, tab_start, ramp_up_end, False), bottom, top)
 
         r += free
 #        r += ramp_up
-        r += tab
+        r += tab1
+        r += tab2
 #        r += ramp_down
 
         start = tab_end
@@ -319,6 +430,20 @@ def make_gaps(polyline, lengths, gap, top, bottom, closed):
     # Tail end
     tail = set_z(segment(polyline, start, polyline_length(polyline, closed), closed), bottom)
     r += tail
+    return r
+
+def ramp(polyline, start_height, end_height, closed):
+    """
+    Adds a third coordinate, z, to the polyline points, from 'top' to 'bottom', proportional to the length along the line.
+    Will add an extra point that is a duplicate of the first point if closed=True (the default).
+    """
+    #print "ramp(", start_height, end_height, closed, ")"
+    max = polyline_length(polyline, closed)
+
+    r = []
+    for (p, l) in lengths(polyline, closed):
+        r.append(p + [start_height + (l/max) * (end_height - start_height)])
+
     return r
 
 def ramp2(polyline, start_z, end_z):
@@ -356,8 +481,10 @@ def mirror_x(contour, closed):
 
     return r
 
-def reverse(contour):
-    return [contour[0]] + contour[1:][::-1]  # Contour[0] is added to the front to maintain the start point
+def reverse(contour, closed=True):
+    if closed:
+        return [contour[0]] + contour[1:][::-1]  # Contour[0] is added to the front to maintain the start point
+    return contour[::-1]
 
 def translate(poly, dx, dy):
     if len(poly) == 0:
@@ -386,6 +513,14 @@ def left(poly):
 
 def leftmost_index(poly):
     values = [p[0] for p in poly]
+    return values.index(min(values))
+
+def bottommost_index(poly):
+    values = [p[1] for p in poly]
+    return values.index(min(values))
+
+def closest_index(poly, to_point):
+    values = [abs(line_length([p, to_point])) for p in poly]
     return values.index(min(values))
 
 def pairs(l, closed):
@@ -433,15 +568,3 @@ def lengths(polyline, closed):
         yield [p[1], l]
 
 
-def ramp(polyline, start_height, end_height, closed):
-    """
-    Adds a third coordinate, z, to the polyline points, from 'top' to 'bottom', proportional to the length along the line.
-    Will add an extra point that is a duplicate of the first point if closed=True (the default).
-    """
-    max = polyline_length(polyline, closed)
-
-    r = []
-    for (p, l) in lengths(polyline, closed):
-        r.append(p + [start_height + (l/max) * (end_height - start_height)])
-
-    return r
