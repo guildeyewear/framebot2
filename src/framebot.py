@@ -1,4 +1,4 @@
-from dxfwrite import DXFEngine as dxf
+#from dxfwrite import DXFEngine as dxf
 import json
 from optparse import OptionParser
 import os
@@ -75,27 +75,28 @@ def main():
 
     # Create the milling program for the lens holes/groove, hinge pockets, etc.
     # and the dxf for the laser for the fronts
+
     mill_fronts(order_dir, o)
     laser_face = o['face_con']
     laser_face = laser_face + poly.reverse(poly.mirror_x(laser_face, False))[1:]
 
     # Rearrange the face curve a bit so the laser starts outside the curve.
     # Otherwise it leaves a little scar where it starts.
-    laser_face = poly.new_start(laser_face, poly.leftmost_index(laser_face))
-    laser_face.append(laser_face[0]) # Close the curve
+    #laser_face = poly.new_start(laser_face, poly.leftmost_index(laser_face))
+    #laser_face.append(laser_face[0]) # Close the curve
 
-    first_vector = [laser_face[1][0]-laser_face[0][0], laser_face[1][1]-laser_face[0][1]]
-    unit = math.sqrt(first_vector[0]**2 + first_vector[1]**2)
-    leadin_vector = [(4*first_vector[0])/unit,(4*first_vector[1])/unit]
-    leadin_start = [laser_face[0][0] - leadin_vector[0], laser_face[0][1] - leadin_vector[1]]
+    #first_vector = [laser_face[1][0]-laser_face[0][0], laser_face[1][1]-laser_face[0][1]]
+    #unit = math.sqrt(first_vector[0]**2 + first_vector[1]**2)
+    #leadin_vector = [(4*first_vector[0])/unit,(4*first_vector[1])/unit]
+    #leadin_start = [laser_face[0][0] - leadin_vector[0], laser_face[0][1] - leadin_vector[1]]
 
-    last_vector = [laser_face[-2][0]-laser_face[-1][0], laser_face[-2][1]-laser_face[-1][1]]
-    unit = math.sqrt(last_vector[0]**2 + last_vector[1]**2)
-    leadout_vector = [(4*last_vector[0])/unit,(4*last_vector[1])/unit]
-    leadout_end = [laser_face[-1][0] + leadout_vector[0], laser_face[-1][1] + leadout_vector[1]]
+    #last_vector = [laser_face[-2][0]-laser_face[-1][0], laser_face[-2][1]-laser_face[-1][1]]
+    ##unit = math.sqrt(last_vector[0]**2 + last_vector[1]**2)
+    #leadout_vector = [(4*last_vector[0])/unit,(4*last_vector[1])/unit]
+    #leadout_end = [laser_face[-1][0] + leadout_vector[0], laser_face[-1][1] + leadout_vector[1]]
 
 #    laser_face.insert(0, leadin_start)
-    create_dxf(order_dir + "/face_contour.dxf", [laser_face], close=False)
+#    create_dxf(order_dir + "/face_contour.dxf", [laser_face], close=False)
 
 #    temple_dxf(o, order_dir + "/left_temple.dxf", 1, False)
 #    temple_dxf(o, order_dir + "/right_temple.dxf", 1, True)
@@ -105,19 +106,8 @@ def main():
     temples =  arrange_temple_curves(o['ltemple_con'], o.get('lhinge') or 1)
     left_hinge = poly.rotate_90(temples['left_hinge_contour'])
     right_hinge = poly.rotate_90(temples['right_hinge_contour'])
-#
     l_temple = poly.rotate_90(temples['left_temple_contour']);
     r_temple = poly.rotate_90(temples['right_temple_contour']);
-#
-    create_dxf(order_dir + "/temple_contour.dxf",
-            [poly.rotate_90(temples['left_temple_contour']),
-             poly.rotate_90(temples['right_temple_contour'])[::-1],
-#             left_hinge,
-#             right_hinge,
-            ],
-            close_with_arc=False,
-            close=False)
-
     mill_temples(order_dir, temples, o)
 
 #    mill_lenses(order_dir, o)
@@ -305,7 +295,7 @@ def mill_fronts(outdir, order):
 
         # Note that X and Y parameters in the order are switched from our system
         #TODO: replace the thickness offset with the thickness of the TEMPLE, not the fronts.
-        index_holes(frame_thickness+machining_z_offset),
+    #    index_holes(frame_thickness+machining_z_offset),
         lens_holes(left_lens_c, right_lens_c, frame_thickness + machining_z_offset),
         lens_groove(left_lens_c, right_lens_c, groove_depth),
 
@@ -332,6 +322,7 @@ def mill_fronts(outdir, order):
 
         #generic_nose_contour(face_c, frame_thickness, machining_z_offset, -x_shift),
 
+        cutout_fronts(face_c, frame_thickness+machining_z_offset+0.5),
 
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
@@ -342,6 +333,37 @@ def mill_fronts(outdir, order):
     ]
     print 'Writing face milling program to ', outdir + "/face_stange1.ngc"
     open(outdir + "/face_stage1.ngc", "w").write(to_string(program))
+
+def cutout_fronts(face_con, cutout_depth):
+  #tool_radius = 3.175/2
+  tool_radius = 9.525/2
+  #Our ramp in should be a little wider than the actual contour to
+# deal with tool deflection
+  face_con_rampin = poly.dilate(tool_radius+0.2, face_con)
+  face_con = poly.dilate(tool_radius, face_con)
+
+  # Take the last 25mm of the segment and use it as an initial ramp
+  len = poly.polyline_length(face_con, True)
+  ramp_segment = poly.segment(face_con_rampin, len-50, len, True)
+  ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth, False)
+  tabs = poly.intercepts(face_con, False, [], [-40, 40])
+  #face_con = poly.make_tabs(face_con, tabs, 25, -cutout_depth,  -cutout_depth + 2, False)
+  face_con = poly.make_ramped_tabs(face_con, tabs, 20, -cutout_depth,  -cutout_depth + 2, False)
+  face_con = ramp_segment + face_con
+
+
+
+  print 'Got tabs: ', tabs
+  return [
+    cam.comment("Cut out fronts"),
+    cam.change_tool("3/8in endmill"),
+    cam.start_spindle(20000),
+    cam.feedrate(750),
+    cam.rmp(face_con[0], 2.0, 20.0),
+    cam.contour(face_con, False),
+    cam.stop_spindle(),
+    cam.retract_spindle()
+    ]
 
 def generic_nose_contour(face_con, thickness, thin_back, centering_shift):
     """ Use the tapered endmill to create a nose relief along the curve of the
@@ -476,31 +498,55 @@ def mill_temples(outdir, temples, order):
         cam.rapid([0,0]),
         cam.activate_pin("stock_clamp"),
         surface_back(thin_back),
-        index_holes(top_raw),
-
-
-#        cam.rapid(l_temple[0]+[0]),
-#        cam.contour(l_temple, True),
-#        cam.move(l_temple[0]),
-#        cam.rapid(r_temple[0]),
-#        cam.contour(r_temple, True),
-
         rough_temple_bevel(l_temple, thin_back),
         rough_temple_bevel(r_temple, thin_back),
         cam.change_tool("1/16in endmill"),
         cam.rapid([0,0]),
         temple_hinge_pockets(temples, thin_back),
-        cam.change_tool("dovetail"),
         bevel_temple(l_temple, thin_back),
         bevel_temple(r_temple, thin_back),
-        temple_hinge_clearance(l_temple, thin_back),
-        temple_hinge_clearance(r_temple, thin_back),
+##        temple_hinge_clearance(l_temple, thin_back),
+#        temple_hinge_clearance(r_temple, thin_back),
+
+        cutout_temple(l_temple, thin_back+5),
+        cutout_temple(r_temple, thin_back+5),
+
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
-        cam.change_tool("1/8in endmill"),
+
         cam.end_program()
     ]
     open(outdir + "/temples_milling.ngc", "w").write(to_string(program))
+
+def cutout_temple(temple, cutout_depth):
+  tool_radius = 3.175/2
+  entry_offset = 9.525/2 # from clearance on end cut by 3/8" endmill
+  entry = extendLine(temple[0], temple[1], entry_offset)
+  # Keep the entry point close to the top
+
+  if temple[0][0] < temple[-1][0]:
+      entry = extendLine(temple[-1], temple[-2], entry_offset)
+
+  entry = entry + [-cutout_depth]
+
+  temple = poly.dilate(tool_radius, temple)
+  # For some reason dilating the path puts the start point in a random spot.
+  entry_idx = poly.closest_index(temple, entry)
+  temple = poly.new_start(temple, entry_idx)
+  tablocs = [temple[0][1]+40, temple[0][1] + 110]
+  tabs = poly.intercepts(temple, False, [], tablocs)
+  tabbed = poly.make_ramped_tabs(temple, tabs, 15, -cutout_depth, -cutout_depth+2, False)
+
+  return [
+    cam.comment("Cut out temples"),
+    cam.change_tool("1/8in endmill"),
+    cam.start_spindle(20000),
+    cam.feedrate(750),
+    cam.rmp(entry, 1.0, 20.0),
+    cam.contour(tabbed, False),
+    cam.move([None, None, 20]),
+    ]
+
 
 def extendLine(p1, p2, distance):
     lineLen = math.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
@@ -509,15 +555,57 @@ def extendLine(p1, p2, distance):
         p1[1] + distance * ((p1[1]-p2[1])/lineLen)
         ]
 
+def rough_temple_bevel(temple,  thinning):
+    tool_radius = 9.525/2
+    depth = -5 - thinning
+    p1 = extendLine(temple[-1], temple[-2], tool_radius)
+    p2 = extendLine(temple[0], temple[1], tool_radius)
+    rough_line = poly.set_z([p1, p2], depth)
+    ramp = [p2, p1]
+    ramp = poly.ramp(ramp, 0.5, depth, False)
+
+
+# Move to the dovetail cutter entry point, helix through stock.
+# Cut a circle big enough to admit the dovetail cutter.
+# Rough cut the end of the temple
+# Clear a return path for the dovetail cutter.
+    return [
+        cam.change_tool("3/8in endmill"),
+        cam.feedrate(750),
+        cam.start_spindle(),
+        cam.rmp(ramp[0], 20, 5),
+        cam.contour(ramp, False),
+        cam.contour(rough_line, False),
+        cam.rapid([None, None, 20])
+#        cam.rmh(p4 + [-5-thinning], 1, pitch=1),
+#        cam.move(p1),
+#        cam.move(p2),
+#        cam.move(p3),
+##        cam.move(p4),
+#        cam.rapid(p4 + [10])
+        ]
+
+
 def bevel_temple(temple, thinning):
     # Assume a 20 degree dovetail cutter, cutting 5mm from bottom
-    dovetail_offset = 9.52/2 - 1.82
+    entry_offset = 9.525/2
+    dovetail_offset = entry_offset -  1.82
 
-    entry = extendLine(temple[-1], temple[-2], 7.5)
-    # Endpoints for the undercut
+    depth = -5 - thinning
+    entry = extendLine(temple[-1], temple[-2], entry_offset)
+    exit = extendLine(temple[0], temple[1], entry_offset)
     p1 = extendLine(temple[-1], temple[-2], dovetail_offset)
     p2 = extendLine(temple[0], temple[1], dovetail_offset)
-    p2 = extendLine(p2, p1, 2)
+
+    #make just a touch longer
+    p1 = extendLine(p1, p2, 1)
+    p2 = extendLine(p2, p1, 1)
+
+    #entry = extendLine(temple[-1], temple[-2], 7.5)
+    # Endpoints for the undercut
+    #p1 = extendLine(temple[-1], temple[-2], dovetail_offset)
+    #p2 = extendLine(temple[0], temple[1], dovetail_offset)
+    #p2 = extendLine(p2, p1, 2)
 
     return [
         cam.change_tool("dovetail"),
@@ -526,8 +614,8 @@ def bevel_temple(temple, thinning):
         cam.rmp(entry + [-5-thinning]),
         cam.move(p1),
         cam.move(p2),
-        cam.move(entry),
-        cam.move(entry + [10]),
+        cam.move(exit),
+        cam.move(exit + [10]),
             ]
 
 def temple_hinge_clearance(temple, thinning):
@@ -548,34 +636,6 @@ def temple_hinge_clearance(temple, thinning):
 
 
 
-
-def rough_temple_bevel(temple,  thinning):
-    p1 = extendLine(temple[-1], temple[-2], 3.175/2 - 0.5)
-    p2 = extendLine(temple[0], temple[1], 3.175/2 - 0.5)
-    p3 = extendLine(temple[0], temple[1], 15)
-    p4 = extendLine(temple[-1], temple[-2], 15) # room for dovetail
-# p1 and p2 are just extensions of the temple - move them to the side a bit to
-# clearance for when the dovetail cutter comes through
-    p1 = extendLine(p1, p2, 3)
-    p2 = extendLine(p2, p1, 3)
-    p3 = extendLine(p3, p4, 3)
-    p4 = extendLine(p4, p3, 3)
-
-
-# Move to the dovetail cutter entry point, helix through stock.
-# Cut a circle big enough to admit the dovetail cutter.
-# Rough cut the end of the temple
-# Clear a return path for the dovetail cutter.
-    return [
-        cam.change_tool("1/8in endmill"),
-        cam.feedrate(1000),
-        cam.rmh(p4 + [-5-thinning], 1, pitch=1),
-        cam.move(p1),
-        cam.move(p2),
-        cam.move(p3),
-        cam.move(p4),
-        cam.rapid(p4 + [10])
-        ]
 
 
 def surface_front(amount):
@@ -665,7 +725,7 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
     #pocket_depth = left_hinge['pocket_depth']+thin_back
 
     pocket_depth = 1 + thin_back
-    drill_depth = -thin_back - 2.0
+    drill_depth = -thin_back - 6.0
 
     left_contour = poly.mirror_x(poly.rotate_90(left_hinge["face_contour"]), False)
     right_contour = poly.mirror_x(poly.rotate_90(right_hinge["face_contour"]), False)
