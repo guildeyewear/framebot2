@@ -44,7 +44,7 @@ def difference(poly1, poly2):
     c = pyclipper.Pyclipper()
     c.add_polygon(scaled1)
     c.sub_polygon(scaled2)
-    result = c.execute(2)
+    result = c.execute(3)
     sys.stdout = old_stdout
     if result and len(result) > 0:
         return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]]
@@ -52,6 +52,21 @@ def difference(poly1, poly2):
         return result
     #return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]];
 
+def union(poly1, poly2):
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+    scale_factor = 1000.0
+    scaled1 = scale(poly1, scale_factor);
+    scaled2 = scale(poly2, scale_factor);
+    c = pyclipper.Pyclipper()
+    c.add_polygon(scaled1)
+    c.sub_polygon(scaled2)
+    result = c.execute(2)
+    sys.stdout = old_stdout
+    if result and len(result) > 0:
+        return [[p[0]/scale_factor, p[1]/scale_factor] for p in result[0]]
+    else:
+        return result
 
 def line_length(line):
     """Returns length of a line segment [[x0, y0], [x1, y1]]"""
@@ -510,6 +525,15 @@ def right(poly):
 def left(poly):
     """Returns the lowest X value of the polygon points."""
     return min([p[0] for p in poly])
+
+# returns True if p1 is completely contained in p2
+def is_contained(poly1, poly2):
+    contained = top(poly2) < top(poly1) and \
+                bottom(poly2) > bottom(poly1) and \
+                left(poly2) > left(poly1) and \
+                right(poly2) < right(poly1)
+    return contained
+
 
 def leftmost_index(poly):
     values = [p[0] for p in poly]

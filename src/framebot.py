@@ -323,9 +323,9 @@ def mill_fronts(outdir, order):
         #generic_nose_contour(face_c, frame_thickness, machining_z_offset, -x_shift),
 
         cutout_fronts(face_c, frame_thickness+machining_z_offset+0.5),
-
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
+        cam.dwell(3),
         cam.change_tool("1/8in endmill"),
     #    cam.rapid([face_c[0][0], face_c[0][1], -thin_back] ),
     #    cam.contour(face_c, True),
@@ -335,31 +335,32 @@ def mill_fronts(outdir, order):
     open(outdir + "/face_stage1.ngc", "w").write(to_string(program))
 
 def cutout_fronts(face_con, cutout_depth):
-  #tool_radius = 3.175/2
-  tool_radius = 9.525/2
+  tool_radius = 3.175/2
+  #tool_radius = 9.525/2
   #Our ramp in should be a little wider than the actual contour to
 # deal with tool deflection
-  face_con_rampin = poly.dilate(tool_radius+0.2, face_con)
+  face_con_rough = poly.dilate(tool_radius+0.2, face_con)
   face_con = poly.dilate(tool_radius, face_con)
 
   # Take the last 25mm of the segment and use it as an initial ramp
   len = poly.polyline_length(face_con, True)
-  ramp_segment = poly.segment(face_con_rampin, len-50, len, True)
-  ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth, False)
+  ramp_segment = poly.segment(face_con_rough, len-50, len, True)
+  ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth+0.75, False)
+  rough = ramp_segment + face_con_rough
   tabs = poly.intercepts(face_con, False, [], [-40, 40])
-  #face_con = poly.make_tabs(face_con, tabs, 25, -cutout_depth,  -cutout_depth + 2, False)
-  face_con = poly.make_ramped_tabs(face_con, tabs, 20, -cutout_depth,  -cutout_depth + 2, False)
-  face_con = ramp_segment + face_con
+  face_con = poly.make_ramped_tabs(face_con, tabs, 15, -cutout_depth,  -cutout_depth + 1.75, False)
 
 
 
   print 'Got tabs: ', tabs
   return [
     cam.comment("Cut out fronts"),
-    cam.change_tool("3/8in endmill"),
+    cam.change_tool("1/8in endmill"),
     cam.start_spindle(20000),
+    cam.dwell(3),
     cam.feedrate(750),
-    cam.rmp(face_con[0], 2.0, 20.0),
+    cam.rmp(rough[0], 2.0, 20.0),
+    cam.contour(rough, False),
     cam.contour(face_con, False),
     cam.stop_spindle(),
     cam.retract_spindle()
@@ -725,7 +726,7 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
     #pocket_depth = left_hinge['pocket_depth']+thin_back
 
     pocket_depth = 1 + thin_back
-    drill_depth = -thin_back - 6.0
+    drill_depth = -thin_back - 7.0
 
     left_contour = poly.mirror_x(poly.rotate_90(left_hinge["face_contour"]), False)
     right_contour = poly.mirror_x(poly.rotate_90(right_hinge["face_contour"]), False)
@@ -826,13 +827,14 @@ def temple_hinge_pockets(temples, thinned):
         erode = poly.erode(1.5875/2, contour)
         making_progress = True
         while len(erode) > 0 and making_progress:
-            making_progress = False
             for path in erode:
-                if len(path) > 5:
-                    making_progress = True
-                    contours.append(path)
+                if poly.is_contained(contour, path):
+                    if len(path) > 5:
+                        making_progress = True
+                        contours.append(path)
             erode = poly.erode(1.5875/2, contours[-1])
         return contours
+
 
     left_hinge_pocket_contours = pocket_contours(l_hinge)
     right_hinge_pocket_contours = pocket_contours(r_hinge)
@@ -942,6 +944,7 @@ def lens_holes(left_c, right_c, thickness):
         "(Lens Holes)",
         cam.change_tool("1/8in endmill"),
         cam.start_spindle(22000),
+        cam.dwell(3),
         cam.feedrate(2000),
         cam.rmh(right_entry + [-thickness - 1.0], 1.5, 0.5, 1.0),
         cam.contour(right_rough, True),
@@ -1084,9 +1087,8 @@ def arrange_temple_curves(left_temple_contour, hinge):
     y_offset = hinge_y-(lowpoint + (highpoint-lowpoint)/2.0) # Distance to move hinge to center it on temple
 
     # strategy for hinge placement.  Align corner of
-    print left_temple_contour[0][0], left_temple_contour[-1][0]
     temple_x = left_temple_contour[0][0] - (left_temple_contour[0][0] - left_temple_contour[-1][0]) / 2
-    x_offset =   temple_x - left_hinge_contour[0][0] - 2.5
+    x_offset =   temple_x - left_hinge_contour[0][0] - 1.5
 
     left_hinge_contour = poly.translate(left_hinge_contour, x_offset, y_offset)
     left_holes = poly.translate(left_holes, x_offset, y_offset)
