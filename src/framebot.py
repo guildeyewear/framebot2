@@ -1088,7 +1088,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
     # strategy for hinge placement.  Align corner of
     temple_x = left_temple_contour[0][0] - (left_temple_contour[0][0] - left_temple_contour[-1][0]) / 2
-    x_offset =   temple_x - left_hinge_contour[0][0] - 1.5
+    x_offset =   temple_x - left_hinge_contour[0][0] - 2.0
 
     left_hinge_contour = poly.translate(left_hinge_contour, x_offset, y_offset)
     left_holes = poly.translate(left_holes, x_offset, y_offset)
