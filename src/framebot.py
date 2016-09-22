@@ -310,12 +310,15 @@ def mill_fronts(outdir, order):
         face_hinge_pockets(order.get("lhinge") or 1, hinge_loc, order["ltemple_x"], (-x_shift, -y_shift), machining_z_offset),
 
         #nose_pads(order, thickness),
-        nose_contour(
-            float(size_info["noseradius"]),
-            float(size_info["noseheight"]),
-            float(size_info["splayangle"]),
-            float(size_info["ridgeangle"]),
-            face_c, frame_thickness, machining_z_offset, -x_shift ),
+        ##
+        ## COMMENTED OUT FOR NOSEPADS
+        ##
+        #nose_contour(
+        #    float(size_info["noseradius"]),
+        #    float(size_info["noseheight"]),
+        #    float(size_info["splayangle"]),
+        #    float(size_info["ridgeangle"]),
+        #    face_c, frame_thickness, machining_z_offset, -x_shift ),
 
 #        nose_contour(
 #            7.0, 8.0, 30.0, 32.0, face_c, frame_thickness, machining_z_offset, -x_shift),
@@ -885,8 +888,8 @@ def lens_groove(left_c, right_c, height):
     if not poly.is_ccw(right_c):
         right_c = poly.reverse(right_c)
 
-    lgroove = poly.erode(1.8, left_c)[0]
-    rgroove = poly.erode(1.8, right_c)[0]
+    lgroove = poly.erode(1.5, left_c)[0]
+    rgroove = poly.erode(1.5, right_c)[0]
 
     left_entry = poly.erode(7.0, left_c)[0][0];
     right_entry = poly.erode(7.0, right_c)[0][0];
@@ -1137,16 +1140,16 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 
     # Make sure they're not intersecting
-#    translation_step = 2.5
-#    intersection = poly.intersection(left_temple_contour, right_temple_contour)
-#    while(len(intersection) > 0):
-#        left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
-#        left_holes = poly.translate(left_holes, translation_step, 0)
-#        left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
-#        right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
-#        right_holes = poly.translate(right_holes, -translation_step, 0)
-#        right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
-#        intersection = poly.intersection(left_temple_contour, right_temple_contour)
+    translation_step = 2.5
+    intersection = poly.intersection(left_temple_contour, right_temple_contour)
+    while(len(intersection) > 0):
+        left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
+        left_holes = poly.translate(left_holes, translation_step, 0)
+        left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
+        right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
+        right_holes = poly.translate(right_holes, -translation_step, 0)
+        right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
+        intersection = poly.intersection(left_temple_contour, right_temple_contour)
     # Move them together until they touch (may will not have moved at all above because they are far)
     # then back off.
     #smaller translation step (was 1.0)
@@ -1168,13 +1171,13 @@ def arrange_temple_curves(left_temple_contour, hinge):
     
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
     print "before spreading, total width is:", total_width
-    while total_width > 55:
+    while total_width > 59:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
 
 ## Spread them out
 
-    while total_width < 55:
+    while total_width < 59:
         print "spreading out temples"
         left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
         left_holes = poly.translate(left_holes, translation_step, 0)
