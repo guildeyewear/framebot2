@@ -573,7 +573,8 @@ def rough_temple_bevel(temple,  thinning):
     return [
         cam.change_tool("3/8in endmill"),
         cam.feedrate(750),
-        cam.start_spindle(),
+        #sarah added speed here
+        cam.start_spindle(20000),
         cam.rmp(ramp[0], 20, 5),
         cam.contour(ramp, False),
         cam.contour(rough_line, False),
@@ -590,8 +591,8 @@ def rough_temple_bevel(temple,  thinning):
 def bevel_temple(temple, thinning):
     # Assume a 20 degree dovetail cutter, cutting 5mm from bottom
     entry_offset = 9.525/2
-    dovetail_offset = entry_offset -  1.82
-
+    dovetail_offset = entry_offset -  0.5
+    entry_offset = entry_offset + 2
     depth = -5 - thinning
     entry = extendLine(temple[-1], temple[-2], entry_offset)
     exit = extendLine(temple[0], temple[1], entry_offset)
@@ -1069,6 +1070,14 @@ def arrange_temple_curves(left_temple_contour, hinge):
     # Normalize temple to get origin at 0,0
     left_temple_contour = poly.translate(left_temple_contour, -left_temple_contour[0][0], -left_temple_contour[0][1])
 
+    #finding an approximately straight segment across the top of the temple
+    left_temple_origin = left_temple_contour[0]
+    left_temple_50_mm_out = poly.point_at_length(left_temple_contour, 50.0, True)
+
+    #calculate angle of line segment above, from the x axis, and use it to rotate temples closer to parallel
+    angle_to_rotate_temples = math.degrees(math.atan((left_temple_50_mm_out[1]-left_temple_origin[1])/(left_temple_50_mm_out[0]-left_temple_origin[0])))
+    left_temple_contour = poly.rotate(left_temple_contour, -angle_to_rotate_temples)
+
     right_temple_contour = poly.mirror_x(left_temple_contour, False)
 
     left_hinge = hinges.get_hinge(hinge)
@@ -1088,7 +1097,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
     # strategy for hinge placement.  Align corner of
     temple_x = left_temple_contour[0][0] - (left_temple_contour[0][0] - left_temple_contour[-1][0]) / 2
-    x_offset =   temple_x - left_hinge_contour[0][0] - 2.0
+    x_offset =   temple_x - left_hinge_contour[0][0] - 2.5
 
     left_hinge_contour = poly.translate(left_hinge_contour, x_offset, y_offset)
     left_holes = poly.translate(left_holes, x_offset, y_offset)
@@ -1153,28 +1162,18 @@ def arrange_temple_curves(left_temple_contour, hinge):
         right_holes = poly.translate(right_holes, translation_step, 0)
         right_hinge_contour = poly.translate(right_hinge_contour, translation_step, 0)
         intersection = poly.intersection(left_temple_contour, right_temple_contour)
-#
-    # Sarah commented the code below out as it seems to be speading the temples out farther than necessary
-    # And I don't think we need it?
-
-    # We're just overlapping, so now back off
-    # translation_step = 0.5
-    # left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
-    # left_holes = poly.translate(left_holes, translation_step, 0)
-    # left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
-    # right_temple_contour = poly.translate(right_temple_contour, -translation_step, 0)
-    # right_holes = poly.translate(right_holes, -translation_step, 0)
-    # right_hinge_contour = poly.translate(right_hinge_contour, -translation_step, 0)
 
 
 #    # sanity check that we fit on stock
+    
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
     print "before spreading, total width is:", total_width
-    if total_width > 55:
+    while total_width > 55:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
-#
+
 ## Spread them out
+
     while total_width < 55:
         print "spreading out temples"
         left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
