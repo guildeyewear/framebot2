@@ -313,19 +313,19 @@ def mill_fronts(outdir, order):
         ##
         ## COMMENTED OUT FOR NOSEPADS
         ##
-        #nose_contour(
-        #    float(size_info["noseradius"]),
-        #    float(size_info["noseheight"]),
-        #    float(size_info["splayangle"]),
-        #    float(size_info["ridgeangle"]),
-        #    face_c, frame_thickness, machining_z_offset, -x_shift ),
+#        nose_contour(
+#            float(size_info["noseradius"]),
+#            float(size_info["noseheight"]),
+#            float(size_info["splayangle"]),
+#            float(size_info["ridgeangle"]),
+#            face_c, frame_thickness, machining_z_offset, -x_shift ),
 
 #        nose_contour(
 #            7.0, 8.0, 30.0, 32.0, face_c, frame_thickness, machining_z_offset, -x_shift),
 
         #generic_nose_contour(face_c, frame_thickness, machining_z_offset, -x_shift),
 
-        cutout_fronts(face_c, frame_thickness+machining_z_offset+0.5),
+        cutout_fronts(face_c, frame_thickness+machining_z_offset),
         cam.retract_spindle(),
         cam.deactivate_pin("stock_clamp"),
         cam.dwell(3),
@@ -346,13 +346,13 @@ def cutout_fronts(face_con, cutout_depth):
   face_con = poly.dilate(tool_radius, face_con)
 
   # Take the last 25mm of the segment and use it as an initial ramp
-  len = poly.polyline_length(face_con, True)
+  len = poly.polyline_length(face_con_rough, True)
   ramp_segment = poly.segment(face_con_rough, len-50, len, True)
-  ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth+0.75, False)
+
+  ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth+1, False)
   rough = ramp_segment + face_con_rough
   tabs = poly.intercepts(face_con, False, [], [-40, 40])
-  face_con = poly.make_ramped_tabs(face_con, tabs, 15, -cutout_depth,  -cutout_depth + 1.75, False)
-
+  face_con = poly.make_ramped_tabs(face_con, tabs, 15, -cutout_depth-1,  -cutout_depth + 1, False)
 
 
   print 'Got tabs: ', tabs
@@ -427,7 +427,7 @@ def rough_nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, 
 
 def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_back, centering_shift):
     """Creates the nose contour feature toolpath.  Angular arguments are in degrees."""#
-    print 'Generating nose contour'
+    print 'Generating nose contour thin back is ', thin_back
     nr = nose_rad
     nose_tool_radius = 3.175
 
@@ -461,14 +461,14 @@ def nose_contour(nose_rad, nose_h, nose_sa, nose_ra, face_con, thickness, thin_b
     direction = 1
 
     z_start = int((z_depth)*10) # We have to use integers for the range, also step in 1/10 mm steps
-
+    print 'starting nose contour with z_start', z_start
     for i in range(-z_start, int(((thickness)+3)*10)):
         z = -i/10.0
 #        r += cam.move(nextpoly[0])
         if(direction < 0):
             nextpoly.reverse()
         direction = direction * -1
-        r += cam.move([None, None, z-thin_back]) # Z adjusted for any surfacing that happened
+        r += cam.move([None, None, z]) # Z adjusted for any surfacing that happened
         r += cam.contour(nextpoly, False)
         nextpoly = nose.nose_poly(nr, h, sa, ra, xfloor, cutter_offset, z)
     return r
@@ -730,7 +730,9 @@ def face_hinge_pockets(hinge_num, hinge_height, temple_position, centering_shift
     #pocket_depth = left_hinge['pocket_depth']+thin_back
 
     pocket_depth = 1 + thin_back
-    drill_depth = -thin_back - 7.0
+
+    drill_depth = -thin_back - 7.0  # rivets
+ #   drill_depth = -thin_back - 1.5   # Screws
 
     left_contour = poly.mirror_x(poly.rotate_90(left_hinge["face_contour"]), False)
     right_contour = poly.mirror_x(poly.rotate_90(right_hinge["face_contour"]), False)
@@ -950,12 +952,12 @@ def lens_holes(left_c, right_c, thickness):
         cam.start_spindle(22000),
         cam.dwell(3),
         cam.feedrate(2000),
-        cam.rmh(right_entry + [-thickness - 1.0], 1.5, 0.5, 1.0),
+        cam.rmh(right_entry + [-thickness - 1.5], 1.5, 0.5, 1.0),
         cam.contour(right_rough, True),
         cam.feedrate(1000),
         cam.contour(rhole, True),
         cam.feedrate(2000),
-        cam.rmh(left_entry + [-thickness - 1.0], 1.5, 0.5, 1.0),
+        cam.rmh(left_entry + [-thickness - 1.5], 1.5, 0.5, 1.0),
         cam.contour(left_rough, True),
         cam.feedrate(1000),
         cam.contour(lhole, True),
@@ -1127,7 +1129,7 @@ def arrange_temple_curves(left_temple_contour, hinge):
 
 #    # Move left one left, right one right to offset them
     temple_width = poly.top(left_temple_contour) - poly.bottom(left_temple_contour)
-    optimization_offset = (160-temple_width)/2.0
+    optimization_offset = (180-temple_width)/2.0
     print 'optimization offset', optimization_offset, temple_width
     left_temple_contour = poly.translate(left_temple_contour, 0, optimization_offset)
     left_holes = poly.translate(left_holes, 0, optimization_offset)
