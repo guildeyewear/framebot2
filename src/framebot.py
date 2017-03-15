@@ -352,8 +352,8 @@ def cutout_fronts(face_con, cutout_depth):
   ramp_segment = poly.ramp(ramp_segment[:-1], 1, -cutout_depth+1, False)
   rough = ramp_segment + face_con_rough
   tabs = poly.intercepts(face_con, False, [], [-40, 40])
+  tabs = list(set(tabs))
   face_con = poly.make_ramped_tabs(face_con, tabs, 15, -cutout_depth-1,  -cutout_depth + 1, False)
-
 
   print 'Got tabs: ', tabs
   return [
@@ -1172,7 +1172,6 @@ def arrange_temple_curves(left_temple_contour, hinge):
 #    # sanity check that we fit on stock
 
     total_width =  poly.right(left_temple_contour) - poly.left(right_temple_contour)
-    print "before spreading, total width is:", total_width
     while total_width > 59:
         print 'Error! temples did not pack tight enough.', total_width
         raise 'Sizing error'
@@ -1180,7 +1179,6 @@ def arrange_temple_curves(left_temple_contour, hinge):
 ## Spread them out
 
     while total_width < 59:
-        print "spreading out temples"
         left_temple_contour = poly.translate(left_temple_contour, translation_step, 0)
         left_holes = poly.translate(left_holes, translation_step, 0)
         left_hinge_contour = poly.translate(left_hinge_contour, translation_step, 0)
